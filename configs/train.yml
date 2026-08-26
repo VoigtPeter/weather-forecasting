@@ -1,0 +1,28 @@
+dataset: "./data/era5_2p8_3l.yml"
+
+model:
+  type: vit            # vit or persistence
+  dim: 256
+  num_layers: 12
+  num_heads: 8
+  dim_heads: 32
+  patch_size: [8, 8]   # (hh, ww)
+  ffn_factor: 2
+  separable_embed: True
+  noise: "adaLN"
+  noise_dim: 16
+  dropout: 0.00
+  time_embed: 8
+
+loss:
+  name: crps
+  kwargs: {}
+
+trainer:
+  lr: 4.0e-3
+  batch_size: 64
+  ensemble_size: 2
+  weight_decay: 0.01
+  betas: [0.9, 0.95]
+  max_steps: 20000
+  num_data_workers: 0
