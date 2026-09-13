@@ -16,6 +16,22 @@ class PeriodicSinusoidalPE(nn.Module):
         return torch.cat((torch.sin(x), torch.cos(x)), dim=-1)
 
 
+class LatLonWrap(nn.Module):
+    """
+    Wrap encoding, as used by MacAodha et al
+
+    (copied from https://github.com/MarcCoru/locationencoder/blob/main/locationencoder/pe/wrap.py)
+    """
+    def __init__(self) -> None:
+        super().__init__()
+        self.out_dim = 4
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (*, 2 {lat, lon}) -> (*, 4)
+        x = torch.deg2rad(x)
+        return torch.cat((torch.cos(x), torch.sin(x)), dim=-1)
+
+
 if __name__ == "__main__":
     from matplotlib import pyplot as plt
 

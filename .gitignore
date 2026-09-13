@@ -1,3 +1,7 @@
+
+weatherbench2/
+cached-data/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

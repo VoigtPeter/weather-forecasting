@@ -1,3 +1,5 @@
+from typing import Any, Self
+
 import lightning as L
 
 import torch
@@ -18,6 +20,11 @@ class ForecastModule(L.LightningModule):
 
         # prepare data
         self.train_dataset, self.val_dataset, _ = WeatherDataset.from_config(config.dataset)
+
+        # static features we don't need to batch
+        self.register_buffer("data_latlon", self.train_dataset.latlon, persistent=False)
+        self.register_buffer("data_land_sea_mask", self.train_dataset.land_sea_mask, persistent=False)
+        self.register_buffer("data_surface_geopotential", self.train_dataset.geopotential_at_surface, persistent=False)
 
         # prepare model
         if isinstance(self.config.model, ViTConfig):
@@ -50,6 +57,8 @@ class ForecastModule(L.LightningModule):
         self.train_forecast_steps: int = 1
 
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
+        torch.compiler.cudagraph_mark_step_begin()
+
         if self.config.model.time_embed is not None:
             state, time = batch
         else:
@@ -89,6 +98,8 @@ class ForecastModule(L.LightningModule):
 
 
     def validation_step(self, batch: torch.Tensor, batch_idx: int) -> None:
+        torch.compiler.cudagraph_mark_step_begin()
+
         if self.config.model.time_embed is not None:
             state, time = batch
         else:
@@ -119,8 +130,17 @@ class ForecastModule(L.LightningModule):
         if time_delta is None:
             time_delta = self.time_delta
         y = list()
+        noise_cond = torch.randn((x.shape[0], 1, self.model.noise_dim), device=x.device)
         for i in range(steps):
-            next_x = self.model(cur_x, time=cur_time)
+            next_x = self.model(
+                cur_x,
+                time=cur_time,
+                # static features (same for every sample at any timestep):
+                latlon=self.data_latlon,
+                land_sea_mask=self.data_land_sea_mask,
+                surface_geopotential=self.data_surface_geopotential,
+                noise_cond=noise_cond,
+            )
             if cur_time is not None:
                 cur_time = cur_time + time_delta
             y.append(torch.unsqueeze(next_x, dim=2))
@@ -149,6 +169,7 @@ class ForecastModule(L.LightningModule):
             batch_size=self.config.trainer.batch_size,
             num_workers=self.config.trainer.num_data_workers,
             shuffle=True,
+            drop_last=True,
         )
 
     def val_dataloader(self):

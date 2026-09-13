@@ -2,6 +2,8 @@ name: era5_2p8
 train_data_path: C:\Users\voigt\PycharmProjects\weather-forecasting\cached-data\era5_2p8_1996_2015_3l.zarr
 val_data_path: C:\Users\voigt\PycharmProjects\weather-forecasting\cached-data\era5_2p8_2016_3l.zarr
 stats_path: C:\Users\voigt\PycharmProjects\weather-forecasting\cached-data\era5_2p8_1996_2015_3l_stats.zarr
+clim_path: C:\Users\voigt\PycharmProjects\weather-forecasting\cached-data\era5_2p8_1996_2015_3l_clim.zarr
+static_path: C:\Users\voigt\PycharmProjects\weather-forecasting\cached-data\era5_2p8_static.npz
 variables:
   T: [600, 850, 1000]
   Z: [300, 500,  700]
@@ -26,3 +28,6 @@ convert_lon_360_to_180: True
 in_memory: True
 extra_features:
   time: True
+  latlon: True
+  land_sea_mask: True
+  geopotential_at_surface: True

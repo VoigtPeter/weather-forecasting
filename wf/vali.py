@@ -3,15 +3,18 @@ from wf.scaffold import ForecastModule
 import numpy as np
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 
 from utils.config import Config
 from wf.utils.ensemble import ensemble_batch, reverse_ensemble_batch
 
 if __name__ == "__main__":
     config = Config.from_yaml("../configs/train.yml")
+    #config = Config.from_yaml("../configs/train_mhsa.yml")
     config.dataset.in_memory = False
     #test_model_statedict = torch.load("./test_model_5p6_test.pt")
-    module = ForecastModule.load_from_checkpoint("./checkpoints_02/epoch=40-step=18737.ckpt", config=config).to("cpu")
+    module = ForecastModule.load_from_checkpoint("../logs/2p8_sfno_4/checkpoints/step_2_ft/epoch=18-step=34694.ckpt", config=config).to("cpu")
+    #module = ForecastModule.load_from_checkpoint("../logs/2p8_mhsa/checkpoints/step_1/epoch=17-step=16434.ckpt", config=config).to("cpu")
     #module.load_state_dict(test_model_statedict, strict=True)
 
     steps = 30
@@ -79,10 +82,10 @@ if __name__ == "__main__":
     times = (0, 1, 2, 3, 4, 5)
 
     fig, axs = plt.subplots(len(times), figsize=(6, len(times)*6),
-        subplot_kw={"projection": ccrs.PlateCarree()}
+        subplot_kw={"projection": ccrs.EqualEarth()}
     )
     for i, t in enumerate(times):
-        (pred_dataset["T2M"] - gt_dataset["T2M"]).sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), vmin=-20, vmax=20, cmap="RdBu", cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
+        (pred_dataset["U250"] - gt_dataset["U250"]).sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), vmin=-20, vmax=20, cmap="RdBu", cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
         axs[i].coastlines()
     plt.show()
 
@@ -90,9 +93,25 @@ if __name__ == "__main__":
     times = (0, 1, 2, 3, 4, 5, 6)
 
     fig, axs = plt.subplots(len(times), figsize=(6, len(times)*6),
-        subplot_kw={"projection": ccrs.PlateCarree()}
+        subplot_kw={"projection": ccrs.EqualEarth()}
     )
     for i, t in enumerate(times):
-        pred_dataset["T2M"].sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
+        pred_dataset["U250"].sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
         axs[i].coastlines()
     plt.show()
+
+
+    # animation
+    var = "U250"
+    north_pole = ccrs.Orthographic(0, 90)
+
+    fig, ax = plt.subplots(subplot_kw={"projection": ccrs.EqualEarth()})
+    def update(frame: int):
+        #ax.clear()
+        pred_dataset[var].sel(time=frame, m=0).plot(ax=ax, transform=ccrs.PlateCarree(), add_colorbar=False, cmap="viridis")
+        #gt_dataset[var].sel(time=frame).plot(ax=ax, transform=ccrs.PlateCarree(), add_colorbar=False, cmap="viridis")
+        ax.coastlines()
+        #ax.gridlines()
+
+    ani = animation.FuncAnimation(fig=fig, func=update, frames=steps, interval=300)
+    ani.save("./anim_mhsa.gif")

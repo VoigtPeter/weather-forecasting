@@ -1,4 +1,4 @@
-dataset: "./data/era5_2p8_3l.yml"
+dataset: "./data/era5_1p5.yml"
 
 model:
   type: vit            # vit or persistence
@@ -6,7 +6,7 @@ model:
   num_layers: 12
   num_heads: 4
   dim_heads: 64
-  patch_size: [4, 4]   # (hh, ww)
+  patch_size: [8, 11]   # (ww, hh)
   ffn_factor: 2
   separable_embed: True
   noise: "adaLN"
@@ -18,16 +18,17 @@ model:
   latlon_pe: "wrap"
   surface_geopotential: True
   land_sea_mask: True
+  global_skip: True
 
 loss:
   name: crps
   kwargs:
     reduction: sphere  # "sphere" (corrects for distorted grid), "mean" naive mean
-    nlat: 32
-    nlon: 64
+    nlat: 121
+    nlon: 240
 
 trainer:
-  lr: 1.0e-3
+  lr: 2.0e-3
   batch_size: 32
   ensemble_size: 2
   weight_decay: 0.01

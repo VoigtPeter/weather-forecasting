@@ -9,6 +9,7 @@ import torch
 import xarray as xr
 import numpy as np
 import yaml
+from einops import rearrange
 
 from torch.utils.data import Dataset
 
@@ -17,12 +18,6 @@ _DATA_PATHS = {
     "era5_1p5": "gs://weatherbench2/datasets/era5/1959-2023_01_10-6h-240x121_equiangular_with_poles_conservative.zarr",
     "era5_2p8": "gs://weatherbench2/datasets/era5/1959-2022-6h-128x64_equiangular_conservative.zarr",
     "era5_5p6": "gs://weatherbench2/datasets/era5/1959-2023_01_10-6h-64x32_equiangular_conservative.zarr",
-}
-
-_CLIM_DATA_PATHS = {
-    "era5_1p5": "gs://weatherbench2/datasets/era5/1990-2019_6h_240x121_equiangular_with_poles_conservative.zarr",
-    "era5_2p8": None,#"gs://weatherbench2/datasets/era5/",
-    "era5_5p6": "gs://weatherbench2/datasets/era5/1990-2019_6h_64x32_equiangular_conservative.zarr",
 }
 
 _T_dataset_name = Literal["era5_1p5", "era5_2p8", "era5_5p6"]
@@ -51,6 +46,8 @@ class WeatherDataset(Dataset):
             seq_stride: int = 1,
             data_path: str | None = None,
             stats_path: str | None = None,
+            clim_path: str | None = None,
+            static_path: str | None = None,
             time_slice: dict | None = None,
             lat_slice: dict | None = None,
             lon_slice: dict | None = None,
@@ -58,10 +55,12 @@ class WeatherDataset(Dataset):
             extra_features: dict | None = None,
     ) -> None:
         super().__init__()
+        self.name = name
         self.in_memory = in_memory
         self._variables = variables
         self.seq_len = seq_len
         self.seq_stride = seq_stride
+        self.convert_lon_360_to_180 = convert_lon_360_to_180
 
         # 1. load the dataset (either local or remote)
         self.data_path = data_path
@@ -142,6 +141,25 @@ class WeatherDataset(Dataset):
         self._return_time: bool = extra_features.get("time", False)
         self._time = self._load_time()
 
+        # load static features
+        self.static_path = static_path
+        self.latlon: torch.Tensor | None = None
+        self.land_sea_mask: torch.Tensor | None = None
+        self.geopotential_at_surface: torch.Tensor | None = None
+        if self.static_path is not None:
+            self.download_static_features()
+
+        # load clim data
+        self.clim: xr.Dataset | None = None
+        if clim_path is not None:
+            assert os.path.exists(clim_path)
+            if clim_path.lower().endswith(".nc"):
+                self.clim = xr.open_dataset(clim_path)[self.variables]
+            elif clim_path.lower().endswith(".zarr"):
+                self.clim = xr.open_zarr(clim_path)[self.variables]
+            else:
+                raise ValueError(f"clim_path must end with .nc or .zarr, not {repr(clim_path)}")
+
     @property
     def variables(self) -> list[str]:
         return self._variables.keys()
@@ -157,6 +175,48 @@ class WeatherDataset(Dataset):
     @property
     def time_delta(self) -> float:
         return (self._time[1] - self._time[0]).item() * self.seq_stride
+
+    def load_to_memory(self) -> None:
+        assert self.is_offline
+        self.data = self._to_tensor(self.ds)
+        self.in_memory = True
+
+    def download_static_features(self) -> None:
+        assert self.static_path is not None
+        if os.path.isfile(self.static_path):
+            # load from disk
+            static_features = np.load(self.static_path)
+            latlon = static_features["latlon"]
+            land_sea_mask = static_features["land_sea_mask"]
+            geopotential_at_surface = static_features["geopotential_at_surface"]
+        else:
+            # load from cloud
+            print("Downloading static features...")
+            ds = xr.open_zarr(_DATA_PATHS[self.name], storage_options={"token": "anon"}, chunks={})
+            ds = ds[["land_sea_mask", "geopotential_at_surface"]]
+            if self.convert_lon_360_to_180:
+                ds = _convert_longitude_360_to_180(ds, check=True)
+            latlon = rearrange(
+                np.stack(
+                    np.meshgrid(ds["latitude"].data, ds["longitude"].data),
+                    axis=-1,
+                ),
+                "lon lat c -> lat lon c",
+            )
+            land_sea_mask = ds["land_sea_mask"].data.compute().T
+            geopotential_at_surface = ds["geopotential_at_surface"].data.compute().T
+            np.savez(
+                self.static_path,
+                latlon=latlon,
+                land_sea_mask=land_sea_mask,
+                geopotential_at_surface=geopotential_at_surface,
+            )
+        self.latlon = torch.from_numpy(latlon).to(dtype=torch.float32)
+        self.land_sea_mask = torch.from_numpy(land_sea_mask).to(dtype=torch.float32)
+        self.geopotential_at_surface = torch.from_numpy(geopotential_at_surface).to(dtype=torch.float32)
+
+        # post-process
+        self.geopotential_at_surface = (self.geopotential_at_surface - self.geopotential_at_surface.mean()) / self.geopotential_at_surface.std()
 
     def download(self) -> None:
         if self.is_offline:
@@ -204,6 +264,24 @@ class WeatherDataset(Dataset):
         )
         return ds
 
+    def denormalize(self, x: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
+        var_mean = self.stats[:, 0]
+        var_std = self.stats[:, 1]
+        if not torch.is_tensor(x):
+            var_mean = var_mean.numpy()
+            var_std = var_std.numpy()
+        ndim = len(x.shape)
+        if ndim == 3:  # (variables, latitude, longitude)
+            var_std = var_std.reshape(-1, 1, 1)
+            var_mean = var_mean.reshape(-1, 1, 1)
+        elif ndim > 3:  # (variables, ..., latitude, longitude)
+            extra_dims = ndim - 3
+            broadcast_shape = [-1] + [1 for _ in range(extra_dims)] + [1, 1]
+            var_std = var_std.reshape(broadcast_shape)
+            var_mean = var_mean.reshape(broadcast_shape)
+        else:
+            raise NotImplementedError()
+        return (x * var_std) + var_mean
 
     def _to_tensor(self, ds: xr.Dataset) -> torch.Tensor:
         data = torch.from_numpy(
@@ -249,6 +327,8 @@ class WeatherDataset(Dataset):
                 name=config.name,
                 data_path=data_path,
                 stats_path=config.stats_path,
+                clim_path=config.clim_path,
+                static_path=config.static_path,
                 variables=variables,
                 time_slice=time_slice,
                 seq_len=seq_len,
@@ -362,21 +442,27 @@ class WeatherDatasetConfig:
     convert_lon_360_to_180: bool = False
 
     extra_features: dict | None = None
+    clim_path: str | None = None
+    static_path: str | None = None
 
 
 if __name__ == "__main__":
-    config = WeatherDatasetConfig(**yaml.safe_load(open("../../configs/data/era5_2p8_3l.yml", "r")))
+    config = WeatherDatasetConfig(**yaml.safe_load(open("../../configs/data/era5_1p5.yml", "r")))
+    config.in_memory = False
     train_dataset, val_dataset, _ = WeatherDataset.from_config(config)
     #time.sleep(5)
-    #print("downloading train...")
-    #train_dataset.download()
+    print("downloading train...")
+    train_dataset.download()
     #print("downloading validation...")
     #val_dataset.download()
-    #print("downloading DONE")
-    print(len(train_dataset.ds.time))
+    print("downloading DONE")
+    #print(len(train_dataset.ds.time))
+    #train_dataset.download_static_features()
     #print(train_dataset.ds.values())
     #print(dataset.data.shape, dataset.data.is_shared())
 
     #print(len(train_dataset), train_dataset.variables)
     #sample = train_dataset[6]
     #print(sample)
+    #train_dataset.land_sea_mask
+
