@@ -9,11 +9,15 @@ from utils.config import Config
 from wf.utils.ensemble import ensemble_batch, reverse_ensemble_batch
 
 if __name__ == "__main__":
-    config = Config.from_yaml("../configs/train.yml")
+    config = Config.from_yaml("../configs/wet_train_2p8_sfno.yml")
+    #config = Config.from_yaml("../configs/wet_train_1p5_sfno.yml")
+    #config = Config.from_yaml("../configs/train.yml")
     #config = Config.from_yaml("../configs/train_mhsa.yml")
     config.dataset.in_memory = False
     #test_model_statedict = torch.load("./test_model_5p6_test.pt")
-    module = ForecastModule.load_from_checkpoint("../logs/2p8_sfno_4/checkpoints/step_2_ft/epoch=18-step=34694.ckpt", config=config).to("cpu")
+    module = ForecastModule.load_from_checkpoint("../logs/debug/checkpoints/step_1/epoch=0-step=91-v4.ckpt", config=config).to("cpu")
+    #module = ForecastModule.load_from_checkpoint("../logs/1p5_sfno_WeT/checkpoints/step_4_ft/epoch=30-step=56575.ckpt", config=config).to("cpu")
+    #module = ForecastModule.load_from_checkpoint("../logs/2p8_sfno_4/checkpoints/step_2_ft/epoch=18-step=34694.ckpt", config=config).to("cpu")
     #module = ForecastModule.load_from_checkpoint("../logs/2p8_mhsa/checkpoints/step_1/epoch=17-step=16434.ckpt", config=config).to("cpu")
     #module.load_state_dict(test_model_statedict, strict=True)
 
@@ -47,7 +51,7 @@ if __name__ == "__main__":
     plt.show()
 
     var = 0
-    lat, lon = 20, 34
+    lat, lon = 40, 64
     #lat, lon = 15, 50
     true_forecast = list()
     pred_forecast_mean = list()
@@ -85,7 +89,7 @@ if __name__ == "__main__":
         subplot_kw={"projection": ccrs.EqualEarth()}
     )
     for i, t in enumerate(times):
-        (pred_dataset["U250"] - gt_dataset["U250"]).sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), vmin=-20, vmax=20, cmap="RdBu", cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
+        (pred_dataset["Q700"] - gt_dataset["Q700"]).sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), cmap="RdBu", cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
         axs[i].coastlines()
     plt.show()
 
@@ -96,19 +100,19 @@ if __name__ == "__main__":
         subplot_kw={"projection": ccrs.EqualEarth()}
     )
     for i, t in enumerate(times):
-        pred_dataset["U250"].sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
+        pred_dataset["Q700"].sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), cmap="viridis", vmin=0.0, vmax=0.012, cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
         axs[i].coastlines()
     plt.show()
 
 
     # animation
-    var = "U250"
+    var = "Q700"
     north_pole = ccrs.Orthographic(0, 90)
 
     fig, ax = plt.subplots(subplot_kw={"projection": ccrs.EqualEarth()})
     def update(frame: int):
         #ax.clear()
-        pred_dataset[var].sel(time=frame, m=0).plot(ax=ax, transform=ccrs.PlateCarree(), add_colorbar=False, cmap="viridis")
+        pred_dataset[var].sel(time=frame, m=0).plot(ax=ax, transform=ccrs.PlateCarree(), vmin=0.0, vmax=0.012, add_colorbar=False, cmap="viridis")
         #gt_dataset[var].sel(time=frame).plot(ax=ax, transform=ccrs.PlateCarree(), add_colorbar=False, cmap="viridis")
         ax.coastlines()
         #ax.gridlines()

@@ -169,6 +169,10 @@ class WeatherDataset(Dataset):
         return len(self.variables)
 
     @property
+    def num_split_vars(self) -> tuple[int, int]:
+        return self._variables.num_vars()
+
+    @property
     def field_size(self) -> tuple[int, int]:
         return self.ds["latitude"].shape[0], self.ds["longitude"].shape[0]
 
@@ -416,6 +420,34 @@ class ERA5VariableConfig:
         _level_keys("V", self.V)
 
         return keys
+
+    def num_vars(self) -> tuple[int, int]:
+        surface_vars = 0
+        if self.T2M:
+            surface_vars += 1
+        if self.U10M:
+            surface_vars += 1
+        if self.V10M:
+            surface_vars += 1
+        if self.TP6h:
+            surface_vars += 1
+
+        atmosphere_vars = 0
+        def _count_levels(levels: int | Sequence[int] | None):
+            if levels is None:
+                return 0
+            if isinstance(levels, int):
+                return 1
+            return len(levels)
+
+        atmosphere_vars += _count_levels(self.Z)
+        atmosphere_vars += _count_levels(self.T)
+        atmosphere_vars += _count_levels(self.Q)
+        atmosphere_vars += _count_levels(self.U)
+        atmosphere_vars += _count_levels(self.V)
+
+        return surface_vars, atmosphere_vars
+
 
 
 @dataclass

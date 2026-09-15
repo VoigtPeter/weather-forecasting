@@ -3,12 +3,12 @@ from torch import nn
 
 
 class FFN(nn.Module):
-    def __init__(self, dim: int, expansion_factor: int):
+    def __init__(self, dim: int, expansion_factor: int, activation: type[nn.Module] = nn.SiLU):
         super().__init__()
         assert expansion_factor % 2 == 0 and expansion_factor >= 2
         self.lin_up = nn.Linear(dim, dim * expansion_factor)
         self.lin_down = nn.Linear((dim * expansion_factor) // 2, dim)
-        self.activation = nn.SiLU()
+        self.activation = activation()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.lin_up(x)

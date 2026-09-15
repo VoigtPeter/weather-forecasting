@@ -115,8 +115,8 @@ class ViT(nn.Module):
 
     def forward(
             self,
-            x: torch.Tensor,
-            time: torch.Tensor | None = None,
+            x: torch.Tensor,                                   # -> (B, vars, H, W)
+            time: torch.Tensor | None = None,                  # -> (B,)
             latlon: torch.Tensor | None = None,                # -> (H, W, 2)
             land_sea_mask: torch.Tensor | None = None,         # -> (H, W)
             surface_geopotential: torch.Tensor | None = None,  # -> (H, W)

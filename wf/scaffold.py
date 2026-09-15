@@ -5,6 +5,7 @@ import lightning as L
 import torch
 from torch.utils.data import DataLoader
 
+from wf.models.wet import WeTConfig, WeT
 from wf.data.dataset import WeatherDataset
 from wf.models.vit import ViTConfig, ViT
 from wf.modules.loss.crps import CRPSLoss
@@ -32,6 +33,14 @@ class ForecastModule(L.LightningModule):
                 self.config.model,
                 num_vars=self.train_dataset.num_vars,
                 field_size=self.train_dataset.field_size
+            )
+        elif isinstance(self.config.model, WeTConfig):
+            self.model = WeT.from_config(
+                self.config.model,
+                num_surface_vars=self.train_dataset.num_split_vars[0],
+                num_atmosphere_vars=self.train_dataset.num_split_vars[1],
+                nlat=self.train_dataset.field_size[0],
+                nlon=self.train_dataset.field_size[1],
             )
         else:
             raise NotImplementedError()
@@ -130,7 +139,7 @@ class ForecastModule(L.LightningModule):
         if time_delta is None:
             time_delta = self.time_delta
         y = list()
-        noise_cond = torch.randn((x.shape[0], 1, self.model.noise_dim), device=x.device)
+        noise_cond = torch.randn((x.shape[0], self.model.noise_dim), device=x.device)
         for i in range(steps):
             next_x = self.model(
                 cur_x,

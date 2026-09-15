@@ -7,13 +7,13 @@ from wf.utils.config import Config
 from wf.scaffold import ForecastModule
 
 
-DEBUG = True
+DEBUG = False
 
 
 if __name__ == "__main__":
     torch.set_float32_matmul_precision('high')
 
-    config = Config.from_yaml("./configs/train_debug.yml")
+    config = Config.from_yaml("./configs/wet_train_2p8_sfno.yml")
     if DEBUG:
         config.trainer.max_steps = 100
         config.dataset.train_time_slice = dict(start="2006", stop="2006")
@@ -26,9 +26,10 @@ if __name__ == "__main__":
     # compile
     #print("compiling model...")
     #module.model = torch.compile(module.model, fullgraph=False, mode="max-autotune")
+    module.model.compile(fullgraph=False, mode="max-autotune")
     
-    csv_logger = CSVLogger("logs/debug")
-    checkpoint_callback = ModelCheckpoint(dirpath="./logs/debug/checkpoints/step_1", monitor="val/loss_step1")
+    csv_logger = CSVLogger("logs/2p8_WeT_sfno_gcn")
+    checkpoint_callback = ModelCheckpoint(dirpath="./logs/2p8_WeT_sfno_gcn/checkpoints/step_1", monitor="val/loss_step1")
     trainer = L.Trainer(max_steps=config.trainer.max_steps, accelerator="auto", logger=csv_logger,
                         enable_checkpointing=True, callbacks=[checkpoint_callback],
                         val_check_interval=1.0, limit_val_batches=20)
@@ -39,16 +40,16 @@ if __name__ == "__main__":
     # 2. restart training with 2 steps
     #module = ForecastModule.load_from_checkpoint(checkpoint_callback.best_model_path, config=config)
 
-    """ROLLOUT_STEPS = 2
-    BATCH_REDUCTION = 2
-    LR_REDUCTION = 10
+    """ROLLOUT_STEPS = 4
+    BATCH_REDUCTION = 4
+    LR_REDUCTION = 3
 
     config.trainer.batch_size = config.trainer.batch_size // BATCH_REDUCTION
-    config.trainer.lr = ((config.trainer.lr / LR_REDUCTION) / 2) / BATCH_REDUCTION
+    config.trainer.lr = (config.trainer.lr / LR_REDUCTION) / BATCH_REDUCTION
     config.dataset.train_seq_len = ROLLOUT_STEPS + 1
     config.trainer.max_steps = config.trainer.max_steps * BATCH_REDUCTION
 
-    ckpt = torch.load("../logs/2p8_sfno_4/checkpoints/step_1/epoch=19-step=18260.ckpt")
+    ckpt = torch.load("./logs/1p5_sfno_WeT/checkpoints/step_1/epoch=39-step=18240.ckpt")
     modified_state_dict = dict()
     for key, value in ckpt["state_dict"].items():
         key: str = key.replace("._orig_mod", "")
@@ -62,8 +63,8 @@ if __name__ == "__main__":
 
     #module.model = torch.compile(module.model, fullgraph=True, mode="max-autotune")
 
-    csv_logger = CSVLogger("../logs/2p8_sfno_4")
-    checkpoint_callback = ModelCheckpoint(dirpath="../logs/2p8_sfno_4/checkpoints/step_2_ft", monitor="val/loss_step2")
+    csv_logger = CSVLogger("./logs/1p5_sfno_WeT")
+    checkpoint_callback = ModelCheckpoint(dirpath="./logs/1p5_sfno_WeT/checkpoints/step_4_ft", monitor="val/loss_step3")
     trainer = L.Trainer(max_steps=config.trainer.max_steps, accelerator="auto", logger=csv_logger,
                         enable_checkpointing=True, callbacks=[checkpoint_callback],
                         val_check_interval=1.0, limit_val_batches=20)

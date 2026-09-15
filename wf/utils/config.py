@@ -7,10 +7,13 @@ import yaml
 
 from wf.data.dataset import WeatherDatasetConfig
 from wf.models.vit import ViTConfig
+from wf.models.wet import WeTConfig
 
-_t_model_cfg = ViTConfig
+
+_t_model_cfg = ViTConfig | WeTConfig
 _MODEL_TYPES = {
     "vit": ViTConfig,
+    "wet": WeTConfig,
 }
 
 
