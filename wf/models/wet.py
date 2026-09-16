@@ -38,14 +38,19 @@ class WeTEncoder(nn.Module):
             dim: int,
             patch_h: int,
             patch_w: int,
+            tokens_h: int,
+            tokens_w: int,
             separable_embed: bool = True,
+            ffn_factor: int = 2,
+            activation: type[nn.Module] | None = nn.GELU,
     ) -> None:
         super().__init__()
         if separable_embed:
             self.to_tokens = EinMix(
                 "... C (tokens_h patch_h) (tokens_w patch_w) -> ... (tokens_h tokens_w) (C D)",
                 weight_shape="C patch_h patch_w D",
-                C=in_channels, D=dim, patch_h=patch_h, patch_w=patch_w,
+                bias_shape="tokens_h tokens_w C D",
+                C=in_channels, D=dim, patch_h=patch_h, patch_w=patch_w, tokens_h=tokens_h, tokens_w=tokens_w,
             )
         else:
             self.to_tokens = EinMix(
@@ -54,6 +59,8 @@ class WeTEncoder(nn.Module):
                 C=in_channels, D=dim, patch_h=patch_h, patch_w=patch_w,
             )
         self.proj_down = nn.Linear(dim * in_channels, dim)
+        self.activation = activation() if activation is not None else nn.Identity()
+        self.ffn = FFN(dim, ffn_factor, activation=activation)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -61,8 +68,11 @@ class WeTEncoder(nn.Module):
         :return: (..., th*tw, dim)
         """
         x = self.to_tokens(x)
-        return self.proj_down(x)
-
+        x = self.activation(x)
+        x = self.proj_down(x)
+        x = self.activation(x)
+        x = self.ffn(x)
+        return x
 
 class WeTDecoder(nn.Module):
     def __init__(
@@ -75,29 +85,39 @@ class WeTDecoder(nn.Module):
             tokens_w: int,
             separable_embed: bool = True,
             init_zeros: bool = False,
+            ffn_factor: int = 2,
+            activation: type[nn.Module] | None = nn.GELU,
     ) -> None:
         super().__init__()
         if separable_embed:
             self.to_field = EinMix(
                 "... (tokens_h tokens_w) (C D) -> ... C (tokens_h patch_h) (tokens_w patch_w)",
-                weight_shape="D patch_w patch_h C", C=in_channels, D=dim, patch_h=patch_h, patch_w=patch_w, tokens_h=tokens_h, tokens_w=tokens_w,
+                weight_shape="D patch_w patch_h C",
+                bias_shape="patch_w patch_h C",
+                C=in_channels, D=dim, patch_h=patch_h, patch_w=patch_w, tokens_h=tokens_h, tokens_w=tokens_w,
             )
         else:
             self.to_field = EinMix(
                 "... (tokens_h tokens_w) (C D) -> ... C (tokens_h patch_h) (tokens_w patch_w)",
-                weight_shape="D patch_h patch_w", C=in_channels, D=dim, patch_h=patch_h, patch_w=patch_w, tokens_h=tokens_h, tokens_w=tokens_w,
+                weight_shape="D patch_h patch_w",
+                C=in_channels, D=dim, patch_h=patch_h, patch_w=patch_w, tokens_h=tokens_h, tokens_w=tokens_w,
             )
         self.proj_up = nn.Linear(dim, dim * in_channels)
         if init_zeros:
             nn.init.constant_(self.proj_up.weight, 0.0)
             nn.init.constant_(self.proj_up.bias, 0.0)
+        self.activation = activation() if activation is not None else nn.Identity()
+        self.ffn = FFN(dim, ffn_factor, activation=activation)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         :param x: (..., th*tw, dim)
         :return: (..., vars, H, W)
         """
+        x = self.ffn(x)
+        x = self.activation(x)
         x = self.proj_up(x)
+        x = self.activation(x)
         return self.to_field(x)
 
 
@@ -181,15 +201,67 @@ class WeT(nn.Module):
         self.aux_spatial_encoder = None
         if self.aux_spatial_num > 0:
             assert aux_spatial_dim is not None and aux_spatial_dim > 0
-            self.aux_spatial_encoder = WeTEncoder(self.aux_spatial_num, aux_spatial_dim, patch_h, patch_w, separable_embed)
+            self.aux_spatial_encoder = WeTEncoder(
+                self.aux_spatial_num,
+                aux_spatial_dim,
+                patch_h,
+                patch_w,
+                self.H_tokens,
+                self.W_tokens,
+                separable_embed,
+                ffn_factor=ffn_factor,
+                activation=activation,
+            )
 
         # ENCODER
-        self.surface_encoder = WeTEncoder(self.num_surface_vars, dim // 2, patch_h, patch_w, separable_embed)
-        self.atmosphere_encoder = WeTEncoder(self.num_atmosphere_vars, dim // 2, patch_h, patch_w, separable_embed)
+        self.surface_encoder = WeTEncoder(
+            self.num_surface_vars,
+            dim // 2,
+            patch_h,
+            patch_w,
+            self.H_tokens,
+            self.W_tokens,
+            separable_embed,
+            ffn_factor=ffn_factor,
+            activation=activation,
+        )
+        self.atmosphere_encoder = WeTEncoder(
+            self.num_atmosphere_vars,
+            dim // 2,
+            patch_h,
+            patch_w,
+            self.H_tokens,
+            self.W_tokens,
+            separable_embed,
+            ffn_factor=ffn_factor,
+            activation=activation,
+        )
 
         # DECODER
-        self.surface_decoder = WeTDecoder(self.num_surface_vars, dim, patch_h, patch_w, self.H_tokens, self.W_tokens, separable_embed, init_zeros=global_skip)
-        self.atmosphere_decoder = WeTDecoder(self.num_atmosphere_vars, dim, patch_h, patch_w, self.H_tokens, self.W_tokens, separable_embed, init_zeros=global_skip)
+        self.surface_decoder = WeTDecoder(
+            self.num_surface_vars,
+            dim,
+            patch_h,
+            patch_w,
+            self.H_tokens,
+            self.W_tokens,
+            separable_embed,
+            init_zeros=global_skip,
+            ffn_factor=ffn_factor,
+            activation=activation,
+        )
+        self.atmosphere_decoder = WeTDecoder(
+            self.num_atmosphere_vars,
+            dim,
+            patch_h,
+            patch_w,
+            self.H_tokens,
+            self.W_tokens,
+            separable_embed,
+            init_zeros=global_skip,
+            ffn_factor=ffn_factor,
+            activation=activation,
+        )
 
         # TRANSFORMER BLOCKS
         self.blocks = nn.ModuleList([TransformerBlock(
