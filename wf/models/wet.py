@@ -12,13 +12,13 @@ from wf.modules.transformer import TransformerBlock
 
 
 class TimePE(nn.Module):
-    _24: torch.Tensor
+    #tf: torch.Tensor
 
     def __init__(self, dim: int) -> None:
         super().__init__()
         self.time_day_pe = PeriodicSinusoidalPE(dim=dim, period=24.0)
-        self.time_year_pe = PeriodicSinusoidalPE(dim=dim, period=356.25)
-        self.register_buffer("_24", torch.tensor(24.0, dtype=torch.float32))
+        self.time_year_pe = PeriodicSinusoidalPE(dim=dim, period=356.25 * 24.0)
+        #self.register_buffer("tf", torch.tensor(24.0, dtype=torch.float32))
         self.out_dim: int = 2 * dim
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -26,7 +26,7 @@ class TimePE(nn.Module):
         :param x: Hours of the year as tensor of shape (B,)
         :return: Time encoding as tensor of shape (B, 2*dim)
         """
-        tod_pe = self.time_year_pe(torch.fmod(x, self._24))  # -> (B, emb_dim)
+        tod_pe = self.time_day_pe(x)  # -> (B, emb_dim)
         toy_pe = self.time_year_pe(x)  # -> (B, emb_dim)
         return torch.cat((tod_pe, toy_pe), dim=-1)  # (B, 2*dim)
 
@@ -49,7 +49,7 @@ class WeTEncoder(nn.Module):
             self.to_tokens = EinMix(
                 "... C (tokens_h patch_h) (tokens_w patch_w) -> ... (tokens_h tokens_w) (C D)",
                 weight_shape="C patch_h patch_w D",
-                bias_shape="tokens_h tokens_w C D",
+                #bias_shape="tokens_h tokens_w C D",
                 C=in_channels, D=dim, patch_h=patch_h, patch_w=patch_w, tokens_h=tokens_h, tokens_w=tokens_w,
             )
         else:
@@ -59,8 +59,8 @@ class WeTEncoder(nn.Module):
                 C=in_channels, D=dim, patch_h=patch_h, patch_w=patch_w,
             )
         self.proj_down = nn.Linear(dim * in_channels, dim)
-        self.activation = activation() if activation is not None else nn.Identity()
-        self.ffn = FFN(dim, ffn_factor, activation=activation)
+        #self.activation = activation() if activation is not None else nn.Identity()
+        #self.ffn = FFN(dim, ffn_factor, activation=activation)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -68,10 +68,10 @@ class WeTEncoder(nn.Module):
         :return: (..., th*tw, dim)
         """
         x = self.to_tokens(x)
-        x = self.activation(x)
+        #x = self.activation(x)
         x = self.proj_down(x)
-        x = self.activation(x)
-        x = self.ffn(x)
+        #x = self.activation(x)
+        #x = self.ffn(x)
         return x
 
 class WeTDecoder(nn.Module):
@@ -93,7 +93,7 @@ class WeTDecoder(nn.Module):
             self.to_field = EinMix(
                 "... (tokens_h tokens_w) (C D) -> ... C (tokens_h patch_h) (tokens_w patch_w)",
                 weight_shape="D patch_w patch_h C",
-                bias_shape="patch_w patch_h C",
+                #bias_shape="patch_w patch_h C",
                 C=in_channels, D=dim, patch_h=patch_h, patch_w=patch_w, tokens_h=tokens_h, tokens_w=tokens_w,
             )
         else:
@@ -106,18 +106,18 @@ class WeTDecoder(nn.Module):
         if init_zeros:
             nn.init.constant_(self.proj_up.weight, 0.0)
             nn.init.constant_(self.proj_up.bias, 0.0)
-        self.activation = activation() if activation is not None else nn.Identity()
-        self.ffn = FFN(dim, ffn_factor, activation=activation)
+        #self.activation = activation() if activation is not None else nn.Identity()
+        #self.ffn = FFN(dim, ffn_factor, activation=activation)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         :param x: (..., th*tw, dim)
         :return: (..., vars, H, W)
         """
-        x = self.ffn(x)
-        x = self.activation(x)
+        #x = self.ffn(x)
+        #x = self.activation(x)
         x = self.proj_up(x)
-        x = self.activation(x)
+        #x = self.activation(x)
         return self.to_field(x)
 
 

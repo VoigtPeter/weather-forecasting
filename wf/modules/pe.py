@@ -35,10 +35,10 @@ class LatLonWrap(nn.Module):
 if __name__ == "__main__":
     from matplotlib import pyplot as plt
 
-    D = 100
+    D = 10
     S = 1.0
-    pe = PeriodicSinusoidalPE(dim=D, period=365.25)
+    pe = PeriodicSinusoidalPE(dim=D, period=24.0)
     fig, ax = plt.subplots()
-    ax.imshow(pe(torch.arange(0.0, 365.25, S)).cpu().numpy())
-    ax.set_aspect(D / (365 / S))
+    ax.imshow(pe(torch.arange(0.0, 96.0, S)).cpu().numpy())
+    ax.set_aspect(D / (96 / S))
     plt.show()

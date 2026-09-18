@@ -1,5 +1,7 @@
 from typing import Any, Self
 
+import time as TIME
+
 import lightning as L
 
 import torch
@@ -90,6 +92,7 @@ class ForecastModule(L.LightningModule):
 
         loss = self.loss(y_pred, y_true)
         self.log("train/loss", loss.item())
+        self.log("time", TIME.time())
         return loss
 
         """x, y = state[:, :, 0, :, :], state[:, :, 1, :, :]
@@ -132,6 +135,7 @@ class ForecastModule(L.LightningModule):
                 y_pred_step_i = y_pred[:, :, i, :, :]
             loss = self.loss(y_pred_step_i, y_true[:, :, i, :, :])
             self.log(f"val/loss_step{i+1}", loss.item())
+        self.log("time", TIME.time())
 
     def forecast(self, x: torch.Tensor, steps: int = 1, time: torch.Tensor | None = None, time_delta: float | None = None) -> torch.Tensor:
         cur_x = x

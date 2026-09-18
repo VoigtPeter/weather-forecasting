@@ -121,13 +121,14 @@ class TransformerBlock(nn.Module):
             add_c: torch.Tensor | None = None,
             field_size: tuple[int, int] | None = None,
     ) -> torch.Tensor:
-        if self.add_cond_encoder is not None:
-            x = x + self.add_cond_encoder(add_c)
-
         if self.conditioning == "adaLN":
             gamma_1, gamma_2, beta_1, beta_2, alpha_1, alpha_2 = torch.chunk(self.adaLN(c), 6, dim=-1)
 
-            x_att = self.mhsa_norm(x)  # pre-norm
+            x_att = x
+            if self.add_cond_encoder is not None:
+                x_att = x_att + self.add_cond_encoder(add_c)
+
+            x_att = self.mhsa_norm(x_att)  # pre-norm
             x_att = (x_att + beta_1) * gamma_1  # shift, scale
             x_att_mixed = self.mixer(x_att, field_size=field_size)  # attention
             if self.graph_conv:
@@ -148,7 +149,11 @@ class TransformerBlock(nn.Module):
             return x
 
         # default transformer block without conditioning
-        x_att = self.mhsa_norm(x)  # pre-norm
+        x_att = x
+        if self.add_cond_encoder is not None:
+            x_att = x_att + self.add_cond_encoder(add_c)
+
+        x_att = self.mhsa_norm(x_att)  # pre-norm
         x_att_mixed = self.mhsa(x_att)  # attention
         if self.graph_conv:
             x_att_conv = self.conv(x_att)

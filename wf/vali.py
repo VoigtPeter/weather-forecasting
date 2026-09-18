@@ -15,7 +15,7 @@ if __name__ == "__main__":
     #config = Config.from_yaml("../configs/train_mhsa.yml")
     config.dataset.in_memory = False
     #test_model_statedict = torch.load("./test_model_5p6_test.pt")
-    module = ForecastModule.load_from_checkpoint("../logs/2p8_WeT_sfno_gcn/checkpoints/step_4_ft/epoch=1-step=14608.ckpt", config=config).to("cpu")
+    module = ForecastModule.load_from_checkpoint("../logs/2p8_WeT_sfno/checkpoints/step_4_ft/epoch=0-step=4300.ckpt", config=config).to("cpu")
     #module = ForecastModule.load_from_checkpoint("../logs/1p5_sfno_WeT/checkpoints/step_4_ft/epoch=30-step=56575.ckpt", config=config).to("cpu")
     #module = ForecastModule.load_from_checkpoint("../logs/2p8_sfno_4/checkpoints/step_2_ft/epoch=18-step=34694.ckpt", config=config).to("cpu")
     #module = ForecastModule.load_from_checkpoint("../logs/2p8_mhsa/checkpoints/step_1/epoch=17-step=16434.ckpt", config=config).to("cpu")
@@ -89,7 +89,7 @@ if __name__ == "__main__":
         subplot_kw={"projection": ccrs.EqualEarth()}
     )
     for i, t in enumerate(times):
-        (pred_dataset["T1000"] - gt_dataset["T1000"]).sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), cmap="RdBu", cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
+        (pred_dataset["TP6h"] - gt_dataset["TP6h"]).sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), cmap="RdBu", cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
         axs[i].coastlines()
     plt.show()
 
@@ -100,13 +100,13 @@ if __name__ == "__main__":
         subplot_kw={"projection": ccrs.EqualEarth()}
     )
     for i, t in enumerate(times):
-        pred_dataset["T1000"].sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), cmap="viridis", cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
+        pred_dataset["TP6h"].sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), cmap="viridis", cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
         axs[i].coastlines()
     plt.show()
 
 
     # animation
-    var = "T1000"
+    var = "TP6h"
     north_pole = ccrs.Orthographic(0, 90)
 
     fig, ax = plt.subplots(subplot_kw={"projection": ccrs.EqualEarth()})
