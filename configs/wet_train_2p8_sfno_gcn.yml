@@ -3,7 +3,7 @@ dataset: "./data/era5_2p8_3l.yml"
 model:
   type: wet            # vit or persistence
   dim: 256
-  num_layers: 10
+  num_layers: 8
   num_heads: 4
   dim_heads: 64
   patch_size: [4, 4]   # (patch_lat, patch_lon)
@@ -33,10 +33,10 @@ loss:
     nlon: 128
 
 trainer:
-  lr: 0.50e-3
-  batch_size: 16
+  lr: 1.0e-3
+  batch_size: 24
   ensemble_size: 2
   weight_decay: 0.01
   betas: [0.9, 0.95]
-  max_steps: 30000
+  max_steps: 20000
   num_data_workers: 0
