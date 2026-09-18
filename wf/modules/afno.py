@@ -35,8 +35,17 @@ class ComplexBlockLinear(nn.Module):
 
 
 class AFNO2D(nn.Module):
-    def __init__(self, dim: int, num_blocks: int = 1, sparsity: float = 0.1, expansion_factor: int = 1, activation: type[nn.Module] = nn.SiLU) -> None:
+    def __init__(self,
+                 nlat: int,
+                 nlon: int,
+                 dim: int,
+                 num_blocks: int = 1,
+                 sparsity: float = 0.1,
+                 expansion_factor: int = 1,
+                 activation: type[nn.Module] = nn.SiLU) -> None:
         super().__init__()
+        self.nlat = nlat
+        self.nlon = nlon
         self.dim = dim
         self.sparsity = sparsity
 
@@ -49,8 +58,7 @@ class AFNO2D(nn.Module):
     def forward(self, x: torch.Tensor, field_size: tuple[int, int] | None = None) -> torch.Tensor:
         flatten_field: bool = True
         if x.dim() == 3:  # x -> (batch, H*W, dim)
-            assert field_size is not None
-            H, W = field_size
+            H, W = self.nlat, self.nlon
             x = x.view(-1, H, W, self.dim)
         else:
             _, H, W, _ = x.shape

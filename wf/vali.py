@@ -9,35 +9,36 @@ from utils.config import Config
 from wf.utils.ensemble import ensemble_batch, reverse_ensemble_batch
 
 if __name__ == "__main__":
-    config = Config.from_yaml("../configs/wet_train_2p8_sfno.yml")
+    config = Config.from_yaml("../configs/wet_train_2p8_afno.yml")
     #config = Config.from_yaml("../configs/wet_train_1p5_sfno.yml")
     #config = Config.from_yaml("../configs/train.yml")
     #config = Config.from_yaml("../configs/train_mhsa.yml")
     config.dataset.in_memory = False
     #test_model_statedict = torch.load("./test_model_5p6_test.pt")
-    module = ForecastModule.load_from_checkpoint("../logs/2p8_WeT_sfno/checkpoints/step_4_ft/epoch=0-step=4300.ckpt", config=config).to("cpu")
+    module = ForecastModule.load_from_checkpoint("../logs/2p8_WeT_afno/checkpoints/step_4_ft/epoch=0-step=3200.ckpt", config=config).to("cpu")
     #module = ForecastModule.load_from_checkpoint("../logs/1p5_sfno_WeT/checkpoints/step_4_ft/epoch=30-step=56575.ckpt", config=config).to("cpu")
     #module = ForecastModule.load_from_checkpoint("../logs/2p8_sfno_4/checkpoints/step_2_ft/epoch=18-step=34694.ckpt", config=config).to("cpu")
     #module = ForecastModule.load_from_checkpoint("../logs/2p8_mhsa/checkpoints/step_1/epoch=17-step=16434.ckpt", config=config).to("cpu")
     #module.load_state_dict(test_model_statedict, strict=True)
 
-    steps = 30
-    idx = 542
-    ensemble_size = 4
+    steps = 100
+    idx = 23
+    ensemble_size = 1
 
-    x, time_x = module.val_dataset[idx]
-    x = x[:, 0, :, :].unsqueeze(0)
-    time_x = time_x[0].view(1)
-    print(x.shape, time_x.shape)
-    x = ensemble_batch(x, ensemble_size)
-    time_x = ensemble_batch(time_x, ensemble_size)
-    print(x.shape, time_x.shape)
-    gt = torch.cat([module.val_dataset[idx + i][0][:, 1, :, :].unsqueeze(dim=1) for i in range(steps)], dim=1)
-    pred = reverse_ensemble_batch(module.forecast(x, steps=steps, time=time_x), ensemble_size)[0]
+    with torch.no_grad():
+        x, time_x = module.val_dataset[idx]
+        x = x[:, 0, :, :].unsqueeze(0)
+        time_x = time_x[0].view(1)
+        print(x.shape, time_x.shape)
+        x = ensemble_batch(x, ensemble_size)
+        time_x = ensemble_batch(time_x, ensemble_size)
+        print(x.shape, time_x.shape)
+        gt = torch.cat([module.val_dataset[idx + i][0][:, 1, :, :].unsqueeze(dim=1) for i in range(steps)], dim=1)
+        pred = reverse_ensemble_batch(module.forecast(x, steps=steps, time=time_x), ensemble_size)[0]
 
-    print(pred.shape, gt.shape)
+        print(pred.shape, gt.shape)
 
-    rmse_ensemble = list()
+    """rmse_ensemble = list()
     for i in range(steps):
         pred_i = pred[:, :, i, :, :]
         gt_i = gt[:, i, :, :].unsqueeze(0)
@@ -50,7 +51,7 @@ if __name__ == "__main__":
         ax.plot(np.arange(steps), rmse_ensemble[i])
     plt.show()
 
-    var = 0
+    var = 3
     lat, lon = 40, 64
     #lat, lon = 15, 50
     true_forecast = list()
@@ -89,7 +90,7 @@ if __name__ == "__main__":
         subplot_kw={"projection": ccrs.EqualEarth()}
     )
     for i, t in enumerate(times):
-        (pred_dataset["TP6h"] - gt_dataset["TP6h"]).sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), cmap="RdBu", cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
+        (pred_dataset["T2M"] - gt_dataset["T2M"]).sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), cmap="RdBu", cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
         axs[i].coastlines()
     plt.show()
 
@@ -100,13 +101,16 @@ if __name__ == "__main__":
         subplot_kw={"projection": ccrs.EqualEarth()}
     )
     for i, t in enumerate(times):
-        pred_dataset["TP6h"].sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), cmap="viridis", cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
+        pred_dataset["T2M"].sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), cmap="viridis", cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
         axs[i].coastlines()
     plt.show()
 
 
-    # animation
-    var = "TP6h"
+    # animation"""
+    gt_dataset = module.val_dataset.to_xarray(gt, time=np.arange(steps))
+    pred_dataset = module.val_dataset.to_xarray(pred.transpose(1, 0), m=np.arange(ensemble_size), time=np.arange(steps))
+
+    var = "Q500"
     north_pole = ccrs.Orthographic(0, 90)
 
     fig, ax = plt.subplots(subplot_kw={"projection": ccrs.EqualEarth()})
@@ -117,5 +121,5 @@ if __name__ == "__main__":
         ax.coastlines()
         #ax.gridlines()
 
-    ani = animation.FuncAnimation(fig=fig, func=update, frames=steps, interval=300)
+    ani = animation.FuncAnimation(fig=fig, func=update, frames=steps, interval=100)
     ani.save("./anim_mhsa.gif")

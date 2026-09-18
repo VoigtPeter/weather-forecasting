@@ -67,7 +67,7 @@ class TransformerBlock(nn.Module):
         if mixer == "mhsa":
             self.mixer = MHSA(dim, num_heads, dim_heads)
         elif mixer == "afno":
-            self.mixer = AFNO2D(dim, num_heads, expansion_factor=expansion_factor)
+            self.mixer = AFNO2D(nlat, nlon, dim, num_heads, expansion_factor=expansion_factor)
         elif mixer == "sfno":
             self.mixer = SFNO(nlat, nlon, dim, num_blocks=num_heads, expansion_factor=expansion_factor)
         else:

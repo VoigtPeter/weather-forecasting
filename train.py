@@ -15,8 +15,8 @@ DEBUG = False
 if __name__ == "__main__":
     torch.set_float32_matmul_precision('high')
 
-    model_dir = "2p8_WeT_sfno"
-    config = Config.from_yaml("./configs/wet_train_2p8_sfno.yml")
+    model_dir = "2p8_WeT_afno"
+    config = Config.from_yaml("./configs/wet_train_2p8_afno.yml")
     val_check_interval = 0.33
 
     if DEBUG:
@@ -56,7 +56,7 @@ if __name__ == "__main__":
     config.dataset.train_seq_len = ROLLOUT_STEPS + 1
     config.trainer.max_steps = config.trainer.max_steps // ROLLOUT_STEPS
 
-    ckpt = torch.load("./logs/2p8_WeT_sfno/checkpoints/step_1/epoch=14-step=17439.ckpt")
+    ckpt = torch.load("./logs/2p8_WeT_afno/checkpoints/step_1/epoch=14-step=17840.ckpt")
     #ckpt = torch.load(checkpoint_callback.best_model_path)
     modified_state_dict = dict()
     for key, value in ckpt["state_dict"].items():
@@ -79,4 +79,4 @@ if __name__ == "__main__":
     #torch.save(module.state_dict(), "./test_model_2p8_2_step_finetuned.pt")"""
 
     # go to sleep
-    os.system("rundll32.exe powrprof.dll,SetSuspendState 0,1,0")
+    #os.system("rundll32.exe powrprof.dll,SetSuspendState 0,1,0")
