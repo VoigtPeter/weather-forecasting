@@ -9,21 +9,21 @@ from utils.config import Config
 from wf.utils.ensemble import ensemble_batch, reverse_ensemble_batch
 
 if __name__ == "__main__":
-    config = Config.from_yaml("../configs/wet_train_2p8_afno.yml")
+    config = Config.from_yaml("../configs/vit_train_2p8.yml")
     #config = Config.from_yaml("../configs/wet_train_1p5_sfno.yml")
     #config = Config.from_yaml("../configs/train.yml")
     #config = Config.from_yaml("../configs/train_mhsa.yml")
     config.dataset.in_memory = False
     #test_model_statedict = torch.load("./test_model_5p6_test.pt")
-    module = ForecastModule.load_from_checkpoint("../logs/2p8_WeT_afno/checkpoints/step_4_ft/epoch=0-step=3200.ckpt", config=config).to("cpu")
+    module = ForecastModule.load_from_checkpoint("../logs/2p8_ViT/checkpoints/step_1/epoch=12-step=15807.ckpt", config=config).to("cpu")
     #module = ForecastModule.load_from_checkpoint("../logs/1p5_sfno_WeT/checkpoints/step_4_ft/epoch=30-step=56575.ckpt", config=config).to("cpu")
     #module = ForecastModule.load_from_checkpoint("../logs/2p8_sfno_4/checkpoints/step_2_ft/epoch=18-step=34694.ckpt", config=config).to("cpu")
     #module = ForecastModule.load_from_checkpoint("../logs/2p8_mhsa/checkpoints/step_1/epoch=17-step=16434.ckpt", config=config).to("cpu")
     #module.load_state_dict(test_model_statedict, strict=True)
 
-    steps = 100
+    steps = 30
     idx = 23
-    ensemble_size = 1
+    ensemble_size = 4
 
     with torch.no_grad():
         x, time_x = module.val_dataset[idx]
@@ -38,7 +38,7 @@ if __name__ == "__main__":
 
         print(pred.shape, gt.shape)
 
-    """rmse_ensemble = list()
+    rmse_ensemble = list()
     for i in range(steps):
         pred_i = pred[:, :, i, :, :]
         gt_i = gt[:, i, :, :].unsqueeze(0)
@@ -51,7 +51,7 @@ if __name__ == "__main__":
         ax.plot(np.arange(steps), rmse_ensemble[i])
     plt.show()
 
-    var = 3
+    var = 0
     lat, lon = 40, 64
     #lat, lon = 15, 50
     true_forecast = list()
@@ -110,10 +110,10 @@ if __name__ == "__main__":
     gt_dataset = module.val_dataset.to_xarray(gt, time=np.arange(steps))
     pred_dataset = module.val_dataset.to_xarray(pred.transpose(1, 0), m=np.arange(ensemble_size), time=np.arange(steps))
 
-    var = "Q500"
+    var = "T2M"
     north_pole = ccrs.Orthographic(0, 90)
 
-    fig, ax = plt.subplots(subplot_kw={"projection": ccrs.EqualEarth()})
+    fig, ax = plt.subplots(subplot_kw={"projection": ccrs.EqualEarth(central_longitude=0)})
     def update(frame: int):
         #ax.clear()
         pred_dataset[var].sel(time=frame, m=0).plot(ax=ax, transform=ccrs.PlateCarree(), add_colorbar=False, cmap="viridis")
