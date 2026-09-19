@@ -6,6 +6,7 @@ import tqdm
 import numpy as np
 import torch
 import xarray as xr
+from numba import njit
 from torch.utils.data import DataLoader
 from einops import rearrange
 
@@ -14,7 +15,11 @@ from wf.utils.config import Config
 from wf.utils.ensemble import ensemble_batch, reverse_ensemble_batch
 
 
-def _w_mean(x: np.ndarray, w: np.ndarray, axis = None) -> np.ndarray:
+@njit(fastmath=True, parallel=True)
+def _w_mean(x: np.ndarray, w: np.ndarray, axis: int | tuple[int, int]) -> np.ndarray:
+    w = np.broadcast_to(w, x.shape)
+    if isinstance(axis, tuple):
+        return (x * w).sum(axis=axis[0]).sum(axis=axis[0]) / w.sum(axis=axis[0]).sum(axis=axis[0])
     return (x * w).sum(axis=axis) / w.sum(axis=axis)
 
 
@@ -31,56 +36,70 @@ def _slice_clim(clim: xr.Dataset, hod: np.ndarray, doy: np.ndarray) -> np.ndarra
     return np.concatenate(clim_slices, axis=1)
 
 
-def anomaly_correlation_coef(forecast: np.ndarray, true: np.ndarray, clim: np.ndarray, lat_weights: np.ndarray, axis = None) -> np.ndarray:
-    forecast_delta = forecast - clim
-    true_delta = true - clim
+@njit(fastmath=True, parallel=True)
+def anomaly_correlation_coef(forecast: np.ndarray, true: np.ndarray, clim: np.ndarray, lat_weights: np.ndarray, axis: int | tuple[int, int]) -> np.ndarray:
+    forecast_delta = forecast - np.broadcast_to(clim, forecast.shape)
+    true_delta = np.broadcast_to(true - np.broadcast_to(clim, true.shape), forecast_delta.shape)
     return _w_mean(forecast_delta * true_delta, lat_weights, axis=axis) / (np.sqrt(_w_mean(forecast_delta ** 2,
                                                                                            lat_weights,
                                                                                            axis=axis) * _w_mean(
         true_delta ** 2, lat_weights, axis=axis)))
 
-def rmse(forecast: np.ndarray, true: np.ndarray, lat_weights: np.ndarray, axis = None) -> np.ndarray:
+@njit(fastmath=True, parallel=True)
+def rmse(forecast: np.ndarray, true: np.ndarray, lat_weights: np.ndarray, axis: int | tuple[int, int]) -> np.ndarray:
+    true = np.broadcast_to(true, forecast.shape)
     return np.sqrt(_w_mean((forecast - true) ** 2, lat_weights, axis=axis))
 
 
-def activity(x: np.ndarray, clim: np.ndarray, lat_weights: np.ndarray, axis = None) -> np.ndarray:
+@njit(fastmath=True)
+def activity(x: np.ndarray, clim: np.ndarray, lat_weights: np.ndarray, axis: int | tuple[int, int]) -> np.ndarray:
+    clim = np.broadcast_to(clim, x.shape)
     return rmse(x, clim, lat_weights, axis=axis)
 
 
-def var_time_rank_histogram(x: np.ndarray, lat_weights: np.ndarray) -> np.ndarray:
-    n_ens = x.shape[2]
-    n_batch = x.shape[0]
-    n_lat = x.shape[4]
-    n_lon = x.shape[5]
-    lat_weights = lat_weights.reshape(-1)
-    assert lat_weights.shape[0] == n_lat
-    lat_weights = np.tile(lat_weights.reshape(-1, 1, 1), (1, n_lon, n_batch)).reshape(-1)  # -> (h*w*b,)
+@njit(fastmath=True, parallel=True)
+def var_time_rank_histogram(x_sorted: np.ndarray, lat_weights: np.ndarray) -> np.ndarray:
+    n_ens = x_sorted.shape[2]
+    n_time = x_sorted.shape[3]
+    n_var = x_sorted.shape[1]
+    #n_batch = x.shape[0]
+    #n_lat = x.shape[4]
+    #n_lon = x.shape[5]
+    #lat_weights = lat_weights.reshape(-1)
+    #assert lat_weights.shape[0] == n_lat
+    #lat_weights = np.tile(lat_weights.reshape(-1, 1, 1), (1, n_lon, n_batch)).reshape(-1)  # -> (h*w*b,)
     # x -> (b, var, ens, time, h, w)
-    x_sorted = np.argsort(x, axis=2)
+    #x_sorted = np.argsort(x, axis=2)
     x_min = np.argmin(x_sorted, axis=2)
     # x_min -> (b, var, time, h, w)
     x_min = np.transpose(x_min, (1, 2, 3, 4, 0))
     # x_min -> (var, time, h, w, b)
-    x_min = x_min.reshape(x_min.shape[0], x_min.shape[1], -1)  # flatten last 3 dims
+    x_min = np.ascontiguousarray(x_min).reshape(x_min.shape[0], x_min.shape[1], -1)  # flatten last 3 dims
     # x_min -> (var, time, h*w*b)
-    total_counts = list()
-    for var_slice in x_min:
+    #total_counts = list()
+    total_counts = np.empty((n_var, n_time, n_ens), dtype=lat_weights.dtype)
+    for j, var_slice in enumerate(x_min):
         # var_slice -> (time, h*w*b)
-        time_counts = list()
-        for time_slice in var_slice:
+        #time_counts = list()
+        time_counts = np.empty((n_time, n_ens), dtype=lat_weights.dtype)
+        for i, time_slice in enumerate(var_slice):
             # time_slice -> (h*w*b,)
             #_, counts = np.unique(time_slice, return_counts=True, sorted=True)
-            counts = np.bincount(time_slice, weights=lat_weights, minlength=n_ens)
-            time_counts.append(counts)  # -> (bins,)
-        total_counts.append(np.stack(time_counts, axis=0))  # -> (time, bins)
-    return np.stack(total_counts, axis=0)  # -> (var, time, bins)
+            time_counts[i] = np.bincount(time_slice, weights=lat_weights, minlength=n_ens)
+            #counts = np.bincount(time_slice, weights=lat_weights, minlength=n_ens)
+            #time_counts.append(counts)  # -> (bins,)
+        #total_counts.append(np.stack(time_counts, axis=0))  # -> (time, bins)
+        total_counts[j] = time_counts  # -> (time, bins)
+    #return np.stack(total_counts, axis=0)  # -> (var, time, bins)
+    return total_counts  # -> (var, time, bins)
 
 
+@njit(fastmath=True, parallel=True)
 def classify_clim_above_below(y_pred: np.ndarray, y_true: np.ndarray, y_clim: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     # y_pred -> (b, var, ens, time, h, w)
     # y_true -> (b, var, 1, time, h, w)
     # y_clim -> (b, var, 1, time, h, w)
-    pred_delta = y_pred - y_clim
+    pred_delta = y_pred - np.broadcast_to(y_clim, y_pred.shape)
     true_delta = y_true - y_clim
     ret_pred = np.empty_like(y_pred, dtype=np.int8)
     ret_pred[pred_delta < 0] = 0
@@ -91,6 +110,7 @@ def classify_clim_above_below(y_pred: np.ndarray, y_true: np.ndarray, y_clim: np
     return ret_pred, ret_true
 
 
+@njit(fastmath=True, parallel=True)
 def var_time_reliability(y_pred_cls: np.ndarray, y_true_cls: np.ndarray):
     # y_pred_cls -> (b, var, ens, time, h, w)
     # y_true_cls -> (b, var, 1, time, h, w)
@@ -143,6 +163,9 @@ def compute_acc(
         compile: bool = False,
         hwa: bool = False,
         mode: Literal["model", "persistence", "clim"] = "model",
+        compute_frequencies: bool = False,
+        compute_reliability: bool = False,
+        compute_acc: bool = True,
 ):
     config = Config.from_yaml(config_path)
     config.dataset.in_memory = False
@@ -154,6 +177,7 @@ def compute_acc(
     device = "cpu"
     if hwa:
         if torch.cuda.is_available():
+            torch.set_float32_matmul_precision('high')
             device = "cuda"
             print("Using CUDA accelerator")
         elif torch.mps.is_available():
@@ -173,6 +197,7 @@ def compute_acc(
     if in_memory:
         print("Loading dataset into memory")
         dataset.load_to_memory()
+        dataset.clim.load()
 
     dataset.seq_len = rollout_steps + 1
 
@@ -181,10 +206,14 @@ def compute_acc(
     lat_weights = np.cos(latitudes) / np.mean(np.cos(latitudes))
     assert np.isclose(lat_weights.sum(), len(latitudes)) and np.isclose(lat_weights.mean(), 1.0)
     lat_weights = lat_weights.reshape(-1, 1)  # -> (lat, 1)
+    lat_weights_hwb = np.tile(lat_weights.reshape(-1, 1, 1), (1, len(dataset.ds["longitude"].data), batch_size)).reshape(-1)
 
     # gather metrics
     ACC: np.ndarray | None = None
+    ACC_sq: np.ndarray | None = None
     RMSE: np.ndarray | None = None
+    RMSE_sq: np.ndarray | None = None
+
     A_pred: np.ndarray | None = None
     A_true: np.ndarray | None = None
     rank_histogram_bins: np.ndarray | None = None
@@ -203,7 +232,7 @@ def compute_acc(
             # 2. convert step times (y_time) to dayofyear & hourofday (used to determine clim slice)
             doy = (y_time // 24).detach().cpu().numpy().astype(int) + 1
             hod = (y_time % 24).detach().cpu().numpy().astype(int)
-            clim = _slice_clim(dataset.clim, hod, doy).compute()  # (batch, var,    time, lat, lon)
+            clim = _slice_clim(dataset.clim, hod, doy)  # (batch, var,    time, lat, lon)
             clim_reshaped = np.expand_dims(clim, axis=2)          # (batch, var, 1, time, lat, lon)
 
             # 3. make forecast
@@ -233,19 +262,19 @@ def compute_acc(
             lat_weights_reshaped = lat_weights.reshape(1, 1, 1, 1, -1, 1)
 
             # rank-histogram binning
-            if mode == "model":
+            if mode == "model" and compute_frequencies:
                 true_pred_cat = np.concatenate(
                     (y_true_field_denorm, y_pred_field_denorm),
                     axis=2,
                 )
-                bin_counts = var_time_rank_histogram(true_pred_cat, lat_weights)  # the rank-target must be the first item at the specified axis, i.e., y_true
+                bin_counts = var_time_rank_histogram(np.ascontiguousarray(np.argsort(true_pred_cat, axis=2)), lat_weights_hwb)  # the rank-target must be the first item at the specified axis, i.e., y_true
                 if rank_histogram_bins is None:
                     rank_histogram_bins = bin_counts
                 else:
                     rank_histogram_bins += bin_counts
 
             # reliability curve binning
-            if mode == "model":
+            if mode == "model" and compute_reliability:
                 y_pred_cls, y_true_cls = classify_clim_above_below(y_pred_field_denorm, y_true_field_denorm, clim_reshaped)
                 cls_pred_hist, cls_true_hist = var_time_reliability(y_pred_cls, y_true_cls)
                 if clim_pred_histogram_bins is None:
@@ -263,29 +292,33 @@ def compute_acc(
                 y_pred_field_denorm,
             ), axis=2)
 
-            num_samples += steps.shape[0]  # batch-size
-            acc_ = anomaly_correlation_coef(
-                forecast=y_pred_field_denorm,
-                true=y_true_field_denorm,
-                clim=clim_reshaped,
-                lat_weights=lat_weights_reshaped,
-                axis=(-1, -2),  # (lat, lon)
-            ).sum(axis=0)
-            if ACC is not None:
-                ACC += acc_
-            else:
-                ACC = acc_
+            if mode != "clim" and compute_acc:
+                acc_ = anomaly_correlation_coef(
+                    forecast=y_pred_field_denorm,
+                    true=y_true_field_denorm,
+                    clim=clim_reshaped,
+                    lat_weights=lat_weights_reshaped,
+                    axis=(-1, -2),  # (lat, lon)
+                )
+                if ACC is not None:
+                    ACC += acc_.sum(axis=0)
+                    ACC_sq += np.square(acc_).sum(axis=0)
+                else:
+                    ACC = acc_.sum(axis=0)
+                    ACC_sq = np.square(acc_).sum(axis=0)
 
             rmse_ = rmse(
                 forecast=y_pred_field_denorm,
                 true=y_true_field_denorm,
                 lat_weights=lat_weights_reshaped,
                 axis=(-1, -2),  # (lat, lon)
-            ).sum(axis=0)
+            )
             if RMSE is not None:
-                RMSE += rmse_
+                RMSE += rmse_.sum(axis=0)
+                RMSE_sq += np.square(rmse_).sum(axis=0)
             else:
-                RMSE = rmse_
+                RMSE = rmse_.sum(axis=0)
+                RMSE_sq = np.square(rmse_).sum(axis=0)
 
             a_pred = activity(
                 x=y_pred_field_denorm,
@@ -309,19 +342,25 @@ def compute_acc(
             else:
                 A_true = a_true
 
-            # TODO: tmp remove!!!
-            if num_samples > 32:
-                break
+            num_samples += batch_size  # batch-size
 
-    ACC = ACC / num_samples
-    RMSE = RMSE / num_samples
+            # TODO: tmp remove!!!
+            #if num_samples > 32:
+            #    break
+
+    ACC_mean = ACC / num_samples
+    RMSE_mean = RMSE / num_samples
+    ACC_std = np.sqrt((ACC_sq / num_samples) - np.square(ACC_mean))
+    RMSE_std = np.sqrt((RMSE_sq / num_samples) - np.square(RMSE_mean))
     A_pred = A_pred / num_samples
     A_true = A_true / num_samples
 
     np.savez(
         result_path,
-        ACC=ACC,
-        RMSE=RMSE,
+        ACC=ACC_mean,
+        ACC_std=ACC_std,
+        RMSE=RMSE_mean,
+        RMSE_std=RMSE_std,
         A_pred=A_pred,
         A_true=A_true,
         rank_histogram=rank_histogram_bins,
@@ -332,14 +371,17 @@ def compute_acc(
 
 if __name__ == "__main__":
     compute_acc(
-        "../../logs/WeT_afno_gcn_step4ft.ckpt",
-        "../../configs/WeT_afno_gcn.yml",
-        "../../logs/WeT_afno_gcn_step4ft_metrics.npz",
+        "../../logs/2p8_ViT/checkpoints/step_4_ft/epoch=0-step=3300.ckpt",
+        "../../configs/vit_train_2p8.yml",
+        "../../logs_final/ViT_step4ft_metrics.npz",
         rollout_steps=16,
         ensemble_size=10,
-        batch_size=2,
+        batch_size=16,
         in_memory=True,
-        hwa=False,
-        compile=False,
+        hwa=True,
+        compile=True,
         mode="model",
+        compute_frequencies=True,
+        compute_reliability=False,
+        compute_acc=True,
     )
