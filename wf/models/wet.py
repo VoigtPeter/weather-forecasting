@@ -350,7 +350,7 @@ class WeT(nn.Module):
         return x
 
     @classmethod
-    def from_config(cls, config: WeTConfig, nlat: int, nlon: int, num_surface_vars: int, num_atmosphere_vars: int) -> "WeT":
+    def from_config(cls, config: "WeTConfig", nlat: int, nlon: int, num_surface_vars: int, num_atmosphere_vars: int) -> "WeT":
         kwargs = asdict(config)
         patch_size = kwargs.pop("patch_size", [4, 4])
 

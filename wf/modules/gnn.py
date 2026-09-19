@@ -10,7 +10,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 from einops import rearrange
 
-from modules.ffn import FFN
+from wf.modules.ffn import FFN
 
 # plotting
 import matplotlib.pyplot as plt

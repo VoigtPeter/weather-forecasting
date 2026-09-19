@@ -22,7 +22,7 @@ class ForecastModule(L.LightningModule):
         self.config = config
 
         # prepare data
-        self.train_dataset, self.val_dataset, _ = WeatherDataset.from_config(config.dataset)
+        self.train_dataset, self.val_dataset, self.test_dataset = WeatherDataset.from_config(config.dataset)
 
         # static features we don't need to batch
         self.register_buffer("data_latlon", self.train_dataset.latlon, persistent=False)

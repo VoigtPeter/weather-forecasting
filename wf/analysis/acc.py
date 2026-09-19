@@ -1,4 +1,6 @@
 import math
+from typing import Literal
+
 import tqdm
 
 import numpy as np
@@ -45,7 +47,14 @@ def activity(x: np.ndarray, clim: np.ndarray, lat_weights: np.ndarray, axis = No
     return rmse(x, clim, lat_weights, axis=axis)
 
 
-def var_time_rank_histogram(x: np.ndarray) -> np.ndarray:
+def var_time_rank_histogram(x: np.ndarray, lat_weights: np.ndarray) -> np.ndarray:
+    n_ens = x.shape[2]
+    n_batch = x.shape[0]
+    n_lat = x.shape[4]
+    n_lon = x.shape[5]
+    lat_weights = lat_weights.reshape(-1)
+    assert lat_weights.shape[0] == n_lat
+    lat_weights = np.tile(lat_weights.reshape(-1, 1, 1), (1, n_lon, n_batch)).reshape(-1)  # -> (h*w*b,)
     # x -> (b, var, ens, time, h, w)
     x_sorted = np.argsort(x, axis=2)
     x_min = np.argmin(x_sorted, axis=2)
@@ -60,7 +69,8 @@ def var_time_rank_histogram(x: np.ndarray) -> np.ndarray:
         time_counts = list()
         for time_slice in var_slice:
             # time_slice -> (h*w*b,)
-            _, counts = np.unique(time_slice, return_counts=True, sorted=True)
+            #_, counts = np.unique(time_slice, return_counts=True, sorted=True)
+            counts = np.bincount(time_slice, weights=lat_weights, minlength=n_ens)
             time_counts.append(counts)  # -> (bins,)
         total_counts.append(np.stack(time_counts, axis=0))  # -> (time, bins)
     return np.stack(total_counts, axis=0)  # -> (var, time, bins)
@@ -122,27 +132,47 @@ def var_time_reliability(y_pred_cls: np.ndarray, y_true_cls: np.ndarray):
     return pred_histogram, np.stack((true_count_0, true_count_1), axis=-1)
 
 
-def compute_acc(checkpoint_path: str, config_path: str, rollout_steps: int = 5, ensemble_size: int = 2):
+def compute_acc(
+        checkpoint_path: str,
+        config_path: str,
+        result_path: str,
+        rollout_steps: int = 5,
+        ensemble_size: int = 2,
+        in_memory: bool = False,
+        batch_size: int = 1,
+        compile: bool = False,
+        hwa: bool = False,
+        mode: Literal["model", "persistence", "clim"] = "model",
+):
     config = Config.from_yaml(config_path)
     config.dataset.in_memory = False
-    config.dataset.extra_features = dict(time=True)
 
     # remove ._orig_mod from state dict (torch.compile artifact)
-    checkpoint = torch.load(checkpoint_path)
-    state_dict = dict()
-    for key, value in checkpoint["state_dict"].items():
-        key: str = key.replace("._orig_mod", "")
-        state_dict[key] = value.to("cpu")
-    model: ForecastModule = ForecastModule(config)
-    model.load_state_dict(state_dict)
-    model = model.to("cuda")
+    model: ForecastModule = ForecastModule.load_from_checkpoint(checkpoint_path, config=config)
+
+    # select accelerator
+    device = "cpu"
+    if hwa:
+        if torch.cuda.is_available():
+            device = "cuda"
+            print("Using CUDA accelerator")
+        elif torch.mps.is_available():
+            device = "mps"
+            print("Using MPS accelerator")
+            model = model.to(dtype=torch.float32)
+        device = torch.device(device)
+    model = model.to(device)
 
     model.train_dataset = None
 
-    model.model = torch.compile(model.model, fullgraph=True, mode="max-autotune")
+    if compile:
+        print("Compiling model")
+        model.model = torch.compile(model.model, fullgraph=False, mode="max-autotune")
 
-    dataset = model.val_dataset  # TODO: make configurable
-    #dataset.load_to_memory()
+    dataset = model.test_dataset  # TODO: make configurable
+    if in_memory:
+        print("Loading dataset into memory")
+        dataset.load_to_memory()
 
     dataset.seq_len = rollout_steps + 1
 
@@ -161,11 +191,11 @@ def compute_acc(checkpoint_path: str, config_path: str, rollout_steps: int = 5, 
     clim_pred_histogram_bins: np.ndarray | None = None
     clim_true_histogram_bins: np.ndarray | None = None
     num_samples = 0
-    loader = DataLoader(dataset, batch_size=4, num_workers=0)
+    loader = DataLoader(dataset, batch_size=batch_size, num_workers=0)
     with torch.no_grad():
         for (steps, times) in tqdm.tqdm(loader, total=len(loader)):
             # 1. split inputs / gt_outputs
-            x_field = steps[:, :, 0, ...] # TODO: adapt when model supports >1 field as input
+            x_field = steps[:, :, 0, ...]  # (batch, var, lat, lon)
             x_time = times[:, 0]
             y_true_field = steps[:, :, 1:, ...].numpy()
             y_time = times[:, 1:]
@@ -173,44 +203,59 @@ def compute_acc(checkpoint_path: str, config_path: str, rollout_steps: int = 5, 
             # 2. convert step times (y_time) to dayofyear & hourofday (used to determine clim slice)
             doy = (y_time // 24).detach().cpu().numpy().astype(int) + 1
             hod = (y_time % 24).detach().cpu().numpy().astype(int)
-            clim = _slice_clim(dataset.clim, hod, doy).compute()
+            clim = _slice_clim(dataset.clim, hod, doy).compute()  # (batch, var,    time, lat, lon)
+            clim_reshaped = np.expand_dims(clim, axis=2)          # (batch, var, 1, time, lat, lon)
 
             # 3. make forecast
-            torch.compiler.cudagraph_mark_step_begin()
-            x_field = ensemble_batch(x_field.to(model.device), ensemble_size)
-            x_time = ensemble_batch(x_time.to(model.device), ensemble_size)
-            y_pred_field = reverse_ensemble_batch(model.forecast(x_field, rollout_steps, x_time, dataset.time_delta), ensemble_size)  # un-batch
-            y_pred_field = y_pred_field.transpose(2, 1)
-            y_pred_field = y_pred_field.detach().cpu().numpy()
+            if mode == "model":
+                torch.compiler.cudagraph_mark_step_begin()
+                x_field = ensemble_batch(x_field.to(device), ensemble_size)
+                x_time = ensemble_batch(x_time.to(device), ensemble_size)
+                y_pred_field = reverse_ensemble_batch(model.forecast(x_field, rollout_steps, x_time, dataset.time_delta), ensemble_size)  # un-batch
+                y_pred_field = y_pred_field.transpose(2, 1)
+                y_pred_field = y_pred_field.detach().cpu().numpy()  # (batch, var, ens, time, lat, lon)
+            elif mode == "persistence":
+                y_pred_field = x_field.detach().cpu()  # (batch, var, lat, lon)
+                y_pred_field = y_pred_field.unsqueeze(2).unsqueeze(2)  # (batch, var, 1, 1, lat, lon)
+                time_expand_shape = list(y_pred_field.shape)
+                time_expand_shape[3] = rollout_steps
+                y_pred_field = y_pred_field.expand(*time_expand_shape).numpy()
+            elif mode == "clim":
+                y_pred_field = clim_reshaped  # (batch, var, 1, time, lat, lon)
 
             # 4. denorm
-            y_pred_field_denorm = dataset.denormalize(y_pred_field.transpose(1, 0, 2, 3, 4, 5)).transpose(1, 0, 2, 3, 4, 5)
+            if mode != "clim":
+                y_pred_field_denorm = dataset.denormalize(y_pred_field.transpose(1, 0, 2, 3, 4, 5)).transpose(1, 0, 2, 3, 4, 5)
+            else:
+                y_pred_field_denorm = y_pred_field
             y_true_field_denorm = dataset.denormalize(np.expand_dims(y_true_field, axis=2).transpose(1, 0, 2, 3, 4, 5)).transpose(1, 0, 2, 3, 4, 5)
+
             lat_weights_reshaped = lat_weights.reshape(1, 1, 1, 1, -1, 1)
-            clim_reshaped = np.expand_dims(clim, axis=2)
 
             # rank-histogram binning
-            true_pred_cat = np.concatenate(
-                (y_true_field_denorm, y_pred_field_denorm),
-                axis=2,
-            )
-            bin_counts = var_time_rank_histogram(true_pred_cat)  # the rank-target must be the first item at the specified axis, i.e., y_true
-            if rank_histogram_bins is None:
-                rank_histogram_bins = bin_counts
-            else:
-                rank_histogram_bins += bin_counts
+            if mode == "model":
+                true_pred_cat = np.concatenate(
+                    (y_true_field_denorm, y_pred_field_denorm),
+                    axis=2,
+                )
+                bin_counts = var_time_rank_histogram(true_pred_cat, lat_weights)  # the rank-target must be the first item at the specified axis, i.e., y_true
+                if rank_histogram_bins is None:
+                    rank_histogram_bins = bin_counts
+                else:
+                    rank_histogram_bins += bin_counts
 
             # reliability curve binning
-            y_pred_cls, y_true_cls = classify_clim_above_below(y_pred_field_denorm, y_true_field_denorm, clim_reshaped)
-            cls_pred_hist, cls_true_hist = var_time_reliability(y_pred_cls, y_true_cls)
-            if clim_pred_histogram_bins is None:
-                clim_pred_histogram_bins = cls_pred_hist
-            else:
-                clim_pred_histogram_bins += cls_pred_hist
-            if clim_true_histogram_bins is None:
-                clim_true_histogram_bins = cls_true_hist
-            else:
-                clim_true_histogram_bins += cls_true_hist
+            if mode == "model":
+                y_pred_cls, y_true_cls = classify_clim_above_below(y_pred_field_denorm, y_true_field_denorm, clim_reshaped)
+                cls_pred_hist, cls_true_hist = var_time_reliability(y_pred_cls, y_true_cls)
+                if clim_pred_histogram_bins is None:
+                    clim_pred_histogram_bins = cls_pred_hist
+                else:
+                    clim_pred_histogram_bins += cls_pred_hist
+                if clim_true_histogram_bins is None:
+                    clim_true_histogram_bins = cls_true_hist
+                else:
+                    clim_true_histogram_bins += cls_true_hist
 
             # compute other metrics (for ensemble mean & all members)
             y_pred_field_denorm = np.concatenate((
@@ -265,8 +310,8 @@ def compute_acc(checkpoint_path: str, config_path: str, rollout_steps: int = 5, 
                 A_true = a_true
 
             # TODO: tmp remove!!!
-            #if num_samples > 32:
-            #    break
+            if num_samples > 32:
+                break
 
     ACC = ACC / num_samples
     RMSE = RMSE / num_samples
@@ -274,7 +319,7 @@ def compute_acc(checkpoint_path: str, config_path: str, rollout_steps: int = 5, 
     A_true = A_true / num_samples
 
     np.savez(
-        "../../logs/2p8_extra_features/val_metrics_3.npz",
+        result_path,
         ACC=ACC,
         RMSE=RMSE,
         A_pred=A_pred,
@@ -286,4 +331,15 @@ def compute_acc(checkpoint_path: str, config_path: str, rollout_steps: int = 5, 
 
 
 if __name__ == "__main__":
-    compute_acc("../../logs/2p8_extra_features/checkpoints/step_3/epoch=6-step=12782.ckpt", "../../configs/train.yml", rollout_steps=16, ensemble_size=20)
+    compute_acc(
+        "../../logs/WeT_afno_gcn_step4ft.ckpt",
+        "../../configs/WeT_afno_gcn.yml",
+        "../../logs/WeT_afno_gcn_step4ft_metrics.npz",
+        rollout_steps=16,
+        ensemble_size=10,
+        batch_size=2,
+        in_memory=True,
+        hwa=False,
+        compile=False,
+        mode="model",
+    )

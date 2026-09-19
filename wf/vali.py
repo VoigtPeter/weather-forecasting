@@ -5,17 +5,24 @@ import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
-from utils.config import Config
+from wf.utils.config import Config
 from wf.utils.ensemble import ensemble_batch, reverse_ensemble_batch
 
 if __name__ == "__main__":
-    config = Config.from_yaml("../configs/wet_train_2p8_afno.yml")
+    device = "cpu"
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.mps.is_available():
+        device = "mps"
+    device = torch.device(device)
+
+    config = Config.from_yaml("../configs/WeT_sfno.yml")
     #config = Config.from_yaml("../configs/wet_train_1p5_sfno.yml")
     #config = Config.from_yaml("../configs/train.yml")
     #config = Config.from_yaml("../configs/train_mhsa.yml")
     config.dataset.in_memory = False
     #test_model_statedict = torch.load("./test_model_5p6_test.pt")
-    module = ForecastModule.load_from_checkpoint("../logs/2p8_WeT_afno/checkpoints/step_4_ft/epoch=0-step=3200.ckpt", config=config).to("cpu")
+    module = ForecastModule.load_from_checkpoint("../logs/2p8_WeT_sfno/checkpoints/step_4_ft/epoch=0-step=4300.ckpt", config=config).to("cpu")
     #module = ForecastModule.load_from_checkpoint("../logs/1p5_sfno_WeT/checkpoints/step_4_ft/epoch=30-step=56575.ckpt", config=config).to("cpu")
     #module = ForecastModule.load_from_checkpoint("../logs/2p8_sfno_4/checkpoints/step_2_ft/epoch=18-step=34694.ckpt", config=config).to("cpu")
     #module = ForecastModule.load_from_checkpoint("../logs/2p8_mhsa/checkpoints/step_1/epoch=17-step=16434.ckpt", config=config).to("cpu")
@@ -26,7 +33,7 @@ if __name__ == "__main__":
     ensemble_size = 1
 
     with torch.no_grad():
-        x, time_x = module.val_dataset[idx]
+        x, time_x = module.test_dataset[idx]
         x = x[:, 0, :, :].unsqueeze(0)
         time_x = time_x[0].view(1)
         print(x.shape, time_x.shape)
@@ -34,7 +41,7 @@ if __name__ == "__main__":
         time_x = ensemble_batch(time_x, ensemble_size)
         print(x.shape, time_x.shape)
         gt = torch.cat([module.val_dataset[idx + i][0][:, 1, :, :].unsqueeze(dim=1) for i in range(steps)], dim=1)
-        pred = reverse_ensemble_batch(module.forecast(x, steps=steps, time=time_x), ensemble_size)[0]
+        pred = reverse_ensemble_batch(module.forecast(x.to(device), steps=steps, time=time_x.to(device)), ensemble_size)[0].detach().cpu()
 
         print(pred.shape, gt.shape)
 

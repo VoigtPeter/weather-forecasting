@@ -40,7 +40,7 @@ class WeatherDataset(Dataset):
     def __init__(
             self,
             name: _T_dataset_name,
-            variables: ERA5VariableConfig,
+            variables: "ERA5VariableConfig",
             in_memory: bool = False,
             seq_len: int = 2,
             seq_stride: int = 1,
@@ -324,7 +324,7 @@ class WeatherDataset(Dataset):
         return out
 
     @classmethod
-    def from_config(cls, config: WeatherDatasetConfig) -> tuple[WeatherDataset, WeatherDataset | None, WeatherDataset | None]:
+    def from_config(cls, config: "WeatherDatasetConfig") -> tuple["WeatherDataset", "WeatherDataset | None", "WeatherDataset | None"]:
         variables = ERA5VariableConfig(**config.variables)
         return tuple(
             [WeatherDataset(
@@ -479,12 +479,12 @@ class WeatherDatasetConfig:
 
 
 if __name__ == "__main__":
-    config = WeatherDatasetConfig(**yaml.safe_load(open("../../configs/data/era5_1p5.yml", "r")))
+    config = WeatherDatasetConfig(**yaml.safe_load(open("../../configs/data/era5_2p8_3l.yml", "r")))
     config.in_memory = False
-    train_dataset, val_dataset, _ = WeatherDataset.from_config(config)
+    train_dataset, val_dataset, test_dataset = WeatherDataset.from_config(config)
     #time.sleep(5)
-    print("downloading train...")
-    train_dataset.download()
+    print("downloading test...")
+    test_dataset.download()
     #print("downloading validation...")
     #val_dataset.download()
     print("downloading DONE")

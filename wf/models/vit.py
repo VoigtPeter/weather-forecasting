@@ -177,7 +177,7 @@ class ViT(nn.Module):
         #return rearrange(tokens, "b (H W) (h w v) -> b v (H h) (W w)", W=(x.shape[-1]//self.w), w=self.w, h=self.h)
 
     @classmethod
-    def from_config(cls, config: ViTConfig, field_size: tuple[int, int], num_vars: int) -> "ViT":
+    def from_config(cls, config: "ViTConfig", field_size: tuple[int, int], num_vars: int) -> "ViT":
         kwargs = asdict(config)
         kwargs.update({"num_vars": num_vars, "field_size": field_size})
         return ViT(**kwargs)
