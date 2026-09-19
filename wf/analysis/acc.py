@@ -10,6 +10,7 @@ from numba import njit
 from torch.utils.data import DataLoader
 from einops import rearrange
 
+from wf.analysis.plots import _var_descriptor
 from wf.scaffold import ForecastModule
 from wf.utils.config import Config
 from wf.utils.ensemble import ensemble_batch, reverse_ensemble_batch
@@ -166,9 +167,20 @@ def compute_acc(
         compute_frequencies: bool = False,
         compute_reliability: bool = False,
         compute_acc: bool = True,
+        variables: list[str] | None = None,
 ):
     config = Config.from_yaml(config_path)
     config.dataset.in_memory = False
+
+    var_subset_idx: tuple[int] | None = None
+    if variables is not None:
+        var_subset_idx = list()
+        var_map = _var_descriptor(config_path)
+        print(f"Selecting subset of variables: {repr(variables)}")
+        for v in variables:
+            var_subset_idx.append(var_map.idx(v))
+        var_subset_idx = tuple(var_subset_idx)
+        print(f" - translated into indices: {repr(var_subset_idx)}")
 
     # remove ._orig_mod from state dict (torch.compile artifact)
     model: ForecastModule = ForecastModule.load_from_checkpoint(checkpoint_path, config=config)
@@ -261,6 +273,12 @@ def compute_acc(
 
             lat_weights_reshaped = lat_weights.reshape(1, 1, 1, 1, -1, 1)
 
+            # select variable subset
+            if var_subset_idx is not None:
+                y_pred_field_denorm = y_pred_field_denorm[:, var_subset_idx, :, :, :, :]
+                y_true_field_denorm = y_true_field_denorm[:, var_subset_idx, :, :, :, :]
+                clim_reshaped = clim_reshaped[:, var_subset_idx, :, :, :, :]
+
             # rank-histogram binning
             if mode == "model" and compute_frequencies:
                 true_pred_cat = np.concatenate(
@@ -345,15 +363,21 @@ def compute_acc(
             num_samples += batch_size  # batch-size
 
             # TODO: tmp remove!!!
-            #if num_samples > 32:
-            #    break
+            if num_samples > 512:
+                break
 
-    ACC_mean = ACC / num_samples
-    RMSE_mean = RMSE / num_samples
-    ACC_std = np.sqrt((ACC_sq / num_samples) - np.square(ACC_mean))
-    RMSE_std = np.sqrt((RMSE_sq / num_samples) - np.square(RMSE_mean))
-    A_pred = A_pred / num_samples
-    A_true = A_true / num_samples
+    ACC_mean, ACC_std = None, None
+    if ACC is not None:
+        ACC_mean = ACC / num_samples
+        ACC_std = np.sqrt((ACC_sq / num_samples) - np.square(ACC_mean))
+    RMSE_mean, RMSE_std = None, None
+    if RMSE is not None:
+        RMSE_mean = RMSE / num_samples
+        RMSE_std = np.sqrt((RMSE_sq / num_samples) - np.square(RMSE_mean))
+    if A_pred is not None:
+        A_pred = A_pred / num_samples
+    if A_true is not None:
+        A_true = A_true / num_samples
 
     np.savez(
         result_path,
@@ -371,17 +395,18 @@ def compute_acc(
 
 if __name__ == "__main__":
     compute_acc(
-        "../../logs/2p8_ViT/checkpoints/step_4_ft/epoch=0-step=3300.ckpt",
-        "../../configs/vit_train_2p8.yml",
-        "../../logs_final/ViT_step4ft_metrics.npz",
+        "../../logs/WeT_afno_step4ft.ckpt",
+        "../../configs/WeT_afno.yml",
+        "../../logs/WeT_afno_step4ft_metrics.npz",
         rollout_steps=16,
         ensemble_size=10,
-        batch_size=16,
+        batch_size=4,
         in_memory=True,
         hwa=True,
         compile=True,
         mode="model",
-        compute_frequencies=True,
+        compute_frequencies=False,
         compute_reliability=False,
         compute_acc=True,
+        variables=["T850", "Z500"],
     )
