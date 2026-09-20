@@ -18,8 +18,8 @@ MODELS = {
     ),
     "SFNO":  (
         r"WeT$_{\text{SFNO}}$",
-        "../../logs/WeT_sfno_step4ft_metrics.npz",
-        None,
+        "../../logs_final/WeT_sfno_step4ft_metrics.npz",
+        ["T2M", "TP6h", 'T850', 'Z500'],  # subset vars
     ),
     "SFNO+_": (
         r"WeT$_{\text{SFNO+_}}$",
@@ -28,8 +28,8 @@ MODELS = {
     ),
     "SFNO+": (
         r"WeT$_{\text{SFNO+}}$",
-        "../../logs/WeT_sfno_gcn_step4ft_metrics.npz",
-        None,
+        "../../logs_final/WeT_sfno_gcn_step4ft_metrics.npz",
+        ["T2M", "TP6h", 'T850', 'Z500'],  # subset vars
     ),
     "AFNO_": (
         r"WeT$_{\text{AFNO_}}$",
@@ -48,8 +48,8 @@ MODELS = {
     ),
     "AFNO+":  (
         r"WeT$_{\text{AFNO+}}$",
-        "../../logs/WeT_afno_gcn_step4ft_metrics.npz",
-        None,
+        "../../logs_final/WeT_afno_gcn_step4ft_metrics.npz",
+        ["T2M", "TP6h", 'T850', 'Z500'],  # subset vars
     ),
     #"persistence": (
     #    r"Persistence",
@@ -209,7 +209,7 @@ def plot_info_noise_acc(
     elif models is None:
         models = MODELS.keys()
     var_map = _var_descriptor(model_config)
-    markers = ("o", "D", "s", "v")
+    markers = ("o", "D", "s", "v", "X")
 
     ne_p_vals: dict[str, tuple[np.ndarray, np.ndarray]] = dict()
     for model in models:
@@ -241,7 +241,7 @@ def plot_info_noise_acc(
             x = ne[var_idx, 0, :max_step]
             y = p[var_idx, 0, :max_step]
 
-        ax.plot(x, y, f"{markers[i]}-", label=model_name, markersize=3)
+        ax.plot(x, y, f"{markers[i]}-", label=model_name, markersize=5)
 
     unit = var_map[var].unit
     ax.set_xlabel(f"Noise [{unit}]")
@@ -382,7 +382,7 @@ def plot_rank_histogram(
         framealpha=0.0,
         loc="lower right",
         fontsize=9,
-        ncol=1,
+        ncol=1 if len(models) <= 3 else 2,
     )
     axes[0].set_xlabel("Rank")
     axes[0].set_ylabel(r"$p(\text{Rank})$")
@@ -395,24 +395,24 @@ if __name__ == "__main__":
     plot_info_noise_acc(
         "TP6h",
         model_config="../../configs/WeT_afno.yml",
-        models=["vit", "AFNO", "persistence"],
+        models=["vit", "AFNO+", "SFNO+", "persistence"],
         sci_ticks=True,
         max_step=4
     )
     plt.tight_layout()
     plt.show()
 
-    plot_lead_time_rmse(
-        "T2M",
-        model_config="../../configs/WeT_afno.yml",
-        models=["vit", "AFNO"],
-    )
-    plt.tight_layout()
-    plt.show()
+    #plot_lead_time_rmse(
+    #    "TP6h",
+    #    model_config="../../configs/WeT_afno.yml",
+    #    models=["AFNO+", "SFNO+"],
+    #)
+    #plt.tight_layout()
+    #plt.show()
 
-    plot_rank_histogram(
-        models=["vit", "AFNO"],
-        steps=[0, 7, 19],
-    )
-    plt.tight_layout()
-    plt.show()
+    #plot_rank_histogram(
+    #    models=["vit", "AFNO", "AFNO+", "SFNO", "SFNO+"],
+    #    steps=[0, 7, 19],
+    #)
+    #plt.tight_layout()
+    #plt.show()
