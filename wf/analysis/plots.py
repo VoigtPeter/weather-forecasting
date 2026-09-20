@@ -3,7 +3,7 @@ from typing import NamedTuple
 import numpy as np
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
-
+import matplotlib as mpl
 from matplotlib.ticker import MaxNLocator
 
 from utils.config import Config
@@ -14,34 +14,62 @@ MODELS = {
     "SFNO_": (
         r"WeT$_{\text{SFNO_}}$",
         "../../logs/WeT_sfno_base_metrics.npz",
+        None,
     ),
     "SFNO":  (
         r"WeT$_{\text{SFNO}}$",
         "../../logs/WeT_sfno_step4ft_metrics.npz",
+        None,
     ),
     "SFNO+_": (
         r"WeT$_{\text{SFNO+_}}$",
         "../../logs/WeT_sfno_gcn_base_metrics.npz",
+        None,
     ),
     "SFNO+": (
         r"WeT$_{\text{SFNO+}}$",
         "../../logs/WeT_sfno_gcn_step4ft_metrics.npz",
+        None,
     ),
     "AFNO_": (
         r"WeT$_{\text{AFNO_}}$",
         "../../logs/WeT_afno_base_metrics.npz",
+        None,
     ),
     "AFNO":  (
         r"WeT$_{\text{AFNO}}$",
         "../../logs/WeT_afno_step4ft_metrics.npz",
+        ['T850', 'Z500'],  # subset vars
     ),
+    "vit":  (
+        r"ViT",
+        "../../logs_final/ViT_step4ft_metrics.npz",
+        ["T2M", "TP6h", 'T850', 'Z500'],  # subset vars
+    ),
+    "AFNO+":  (
+        r"WeT$_{\text{AFNO+}}$",
+        "../../logs/WeT_afno_gcn_step4ft_metrics.npz",
+        None,
+    ),
+    #"persistence": (
+    #    r"Persistence",
+    #    "../../logs/persistence_metrics.npz",
+    #    ['T850', 'Z500'],  # subset vars
+    #),
     "persistence": (
         r"Persistence",
-        "../../logs/persistence_metrics.npz",
+        "../../logs_final/persistence_metrics.npz",
+        ["T2M", "TP6h", 'T850', 'Z500'],  # subset vars
     ),
+    #"climatology": (
+    #    r"Climatology",
+    #    "../../logs/clim_metrics.npz",
+    #    ['T850', 'Z500'],  # subset vars
+    #),
     "climatology": (
         r"Climatology",
-        "../../logs/clim_metrics.npz",
+        "../../logs_final/clim_metrics.npz",
+        ["T2M", "TP6h", 'T850', 'Z500'],  # subset vars
     ),
 }
 
@@ -78,7 +106,9 @@ class VarMapping:
             item = self._var_keys[item]
         return self._var_legend[item]
 
-    def idx(self, item: str) -> int:
+    def idx(self, item: str, subset: list[str] | None = None) -> int:
+        if subset is not None:
+            return subset.index(item)
         return self._var_keys.index(item)
 
 
@@ -88,7 +118,7 @@ def _var_descriptor(config_path: str):
     return VarMapping(vars.keys())
 
 
-def _information_noise_diagram_helper(ax: plt.Axes, true_activity: float| tuple[float, float]) -> plt.Axes:
+def _information_noise_diagram_helper(ax: plt.Axes, true_activity: float| tuple[float, float], sci_ticks: bool = False) -> plt.Axes:
     '''Information, noise, and correlation diagram after Bonavita and Geer (2026), Figure 3.
 
     A forecast is a point at (noise error, information).
@@ -151,15 +181,24 @@ def _information_noise_diagram_helper(ax: plt.Axes, true_activity: float| tuple[
     ax.tick_params(which='major', direction="out", width=1.5, length=4)
     ax.tick_params(which='minor', direction="out", width=1.0, length=3)
 
+    if sci_ticks:
+        ax.ticklabel_format(axis='both', style='sci', scilimits=(0, 0))
+        tx = ax.xaxis.get_offset_text()
+        ty = ax.yaxis.get_offset_text()
+        tx.set_fontsize(9)
+        ty.set_fontsize(9)
+        ty.set_x(-0.06)
+
     ax.set_xlabel("noise error")
     ax.set_ylabel("information")
     return ax
 
 
 def plot_info_noise_acc(
-        var: int | str,
+        var: str,
         model_config: str,
         models: str | list[str] | None = None,
+        sci_ticks: bool = False,
         ax: plt.Axes | None = None,
 ) -> plt.Axes:
     if ax is None:
@@ -168,12 +207,15 @@ def plot_info_noise_acc(
         models = [models]
     elif models is None:
         models = MODELS.keys()
+    var_map = _var_descriptor(model_config)
+    markers = ("o", "D", "s", "v")
 
     ne_p_vals: dict[str, tuple[np.ndarray, np.ndarray]] = dict()
     for model in models:
         assert model in MODELS
+        _, model_path, model_subset = MODELS[model]
 
-        metrics = np.load(MODELS[model][1])
+        metrics = np.load(model_path)
         ACC = metrics["ACC"]
         RMSE = metrics["RMSE"]
         A_pred = metrics["A_pred"]
@@ -183,15 +225,15 @@ def plot_info_noise_acc(
         NE = np.sqrt((RMSE ** 2) - (IE ** 2))
         ne_p_vals[model] = (NE, p)
 
-    var_map = _var_descriptor(model_config)
-    var_idx = var_map.idx(var) if isinstance(var, str) else var
+        var_idx = var_map.idx(var, subset=model_subset)
 
-    markers = ("o", "D", "s", "v")
     mean_true_activity = float(A_true[var_idx, 0].mean())
-    _information_noise_diagram_helper(ax, true_activity=mean_true_activity)
+    _information_noise_diagram_helper(ax, true_activity=mean_true_activity, sci_ticks=sci_ticks)
     for i, model in enumerate(models):
+        model_name, _, model_subset = MODELS[model]
         ne, p = ne_p_vals[model]
-        ax.plot(ne[var_idx, 0], p[var_idx, 0], f"{markers[i]}-", label=MODELS[model][0], markersize=3)
+        var_idx = var_map.idx(var, subset=model_subset)
+        ax.plot(ne[var_idx, 0], p[var_idx, 0], f"{markers[i]}-", label=model_name, markersize=3)
 
     unit = var_map[var].unit
     ax.set_xlabel(f"Noise error [{unit}]")
@@ -210,12 +252,104 @@ def plot_info_noise_acc(
     return ax
 
 
+def plot_lead_time_rmse(
+        var: str,
+        model_config: str,
+        models: str | list[str] | None = None,
+        show_climatology: bool = True,
+        show_persistence: bool = True,
+        ax: plt.Axes | None = None,
+        ) -> plt.Axes:
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(5, 4), dpi=300)
+    if isinstance(models, str):
+        models = [models]
+    elif models is None:
+        models = MODELS.keys()
+    var_map = _var_descriptor(model_config)
+
+    def _plot(model: str, legend: bool = True, alpha: float = 0.2, _ret_max_val: bool = False, **plot_kwargs) -> int | tuple[int, float]:
+        model_name, model_path, model_subset = MODELS[model]
+        metrics = np.load(model_path)
+        rmse = metrics["RMSE"][var_map.idx(var, subset=model_subset), 0]
+        rmse_std = metrics["RMSE_std"][var_map.idx(var, subset=model_subset), 0]
+        x = np.arange(rmse.shape[0])
+        line = ax.plot(x, rmse, label=model_name if legend else None, **plot_kwargs)
+        c = line[0].get_color()
+        ax.fill_between(x, rmse - rmse_std, rmse + rmse_std, alpha=alpha, facecolor=c)
+        if _ret_max_val:
+            return len(x), float((rmse + rmse_std).max()), line[0]
+        return len(x)
+
+    # clim & persistence
+    c_steps, c_ymax, c_line = _plot("climatology", legend=False, alpha=0.1, c="#444", linestyle="dashdot", _ret_max_val=True)
+    p_steps, p_ymax, p_line = _plot("persistence", legend=False, alpha=0.1, c="#444", linestyle="dotted", _ret_max_val=True)
+    steps = max(c_steps, p_steps)
+    ymax = max(c_ymax, p_ymax)
+
+    # models
+    for model in models:
+        steps = max(_plot(model, alpha=0.2), steps)
+
+    ax.minorticks_on()
+    ax.xaxis.set_tick_params(which='minor', bottom=False)
+    ticks = np.arange(steps+1, step=4) - 1
+    ticks[0] = 0
+    ax.set_xticks(
+        ticks,
+        labels=[f"{int(t)}" for t in (np.array(ticks) + 1) * 6],
+    )
+    ax.spines.top.set_visible(False)
+    ax.spines.right.set_visible(False)
+    ax.spines.left.set(linewidth=1.5)
+    ax.spines.bottom.set(linewidth=1.5)
+    ax.tick_params(which='major', direction="out", width=1.5, length=4)
+    ax.tick_params(which='minor', direction="out", width=1.0, length=3)
+    ax.set_xlabel("Lead time [$h$]")
+    var = var_map[var]
+    ax.set_ylabel(f"RMSE [{var.unit}]")
+    ax.set_title(var.name)
+    ax.set_ylim(0, ymax * 1.05)
+    ax.set_xlim(0, steps-1)
+
+    sub_legend = ax.legend(
+        handles=[c_line, p_line],
+        labels=["Climatology", "Persistence"],
+        frameon=False,
+        framealpha=0.0,
+        loc="lower center",
+        fontsize=9,
+        ncol=1,
+    )
+    ax.legend(
+        frameon=False,
+        framealpha=0.0,
+        loc="lower right",
+        fontsize=9,
+        ncol=1,
+    )
+    ax.add_artist(sub_legend)
+
+    return ax
+
+
 
 if __name__ == "__main__":
+    #mpl.rc('text', usetex=True)
+
     plot_info_noise_acc(
-        "T2M",
+        "Z500",
         model_config="../../configs/WeT_afno.yml",
-        models=["AFNO", "SFNO", "SFNO+"],
+        models=["vit", "persistence"],
+        sci_ticks=False,
+    )
+    plt.tight_layout()
+    plt.show()
+
+    plot_lead_time_rmse(
+        "TP6h",
+        model_config="../../configs/WeT_afno.yml",
+        models=["vit"],
     )
     plt.tight_layout()
     plt.show()
