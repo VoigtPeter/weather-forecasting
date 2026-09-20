@@ -38,8 +38,8 @@ MODELS = {
     ),
     "AFNO":  (
         r"WeT$_{\text{AFNO}}$",
-        "../../logs/WeT_afno_step4ft_metrics.npz",
-        ['T850', 'Z500'],  # subset vars
+        "../../logs_final/WeT_afno_step4ft_metrics.npz",
+        ["T2M", "TP6h", 'T850', 'Z500'],  # subset vars
     ),
     "vit":  (
         r"ViT",
@@ -134,7 +134,7 @@ def _information_noise_diagram_helper(ax: plt.Axes, true_activity: float| tuple[
     # setup ticks
     minor_tick_bins = 3
     tick_locator = MaxNLocator(nbins=5)
-    ticks = tick_locator.tick_values(0, 1.25 * a_max)
+    ticks = tick_locator.tick_values(0, 1.1 * a_max)
     mticks = np.linspace(ticks[0], ticks[-1], (len(ticks) * minor_tick_bins) - (minor_tick_bins - 1))
     tick_max = ticks[-1]
 
@@ -168,8 +168,8 @@ def _information_noise_diagram_helper(ax: plt.Axes, true_activity: float| tuple[
     ax.set_aspect("equal")
 
     # format ticks & spines
-    ax.set_xlim(0, 1.25 * a_max)
-    ax.set_ylim(0, 1.25 * a_max)
+    ax.set_xlim(0, 1.1 * a_max)
+    ax.set_ylim(0, 1.1 * a_max)
     ax.set_xticks(ticks)
     ax.set_xticks(mticks, minor=True)
     ax.set_yticks(ticks)
@@ -189,7 +189,7 @@ def _information_noise_diagram_helper(ax: plt.Axes, true_activity: float| tuple[
         ty.set_fontsize(9)
         ty.set_x(-0.06)
 
-    ax.set_xlabel("noise error")
+    ax.set_xlabel("noise")
     ax.set_ylabel("information")
     return ax
 
@@ -199,6 +199,7 @@ def plot_info_noise_acc(
         model_config: str,
         models: str | list[str] | None = None,
         sci_ticks: bool = False,
+        max_step: int = None,
         ax: plt.Axes | None = None,
 ) -> plt.Axes:
     if ax is None:
@@ -233,10 +234,17 @@ def plot_info_noise_acc(
         model_name, _, model_subset = MODELS[model]
         ne, p = ne_p_vals[model]
         var_idx = var_map.idx(var, subset=model_subset)
-        ax.plot(ne[var_idx, 0], p[var_idx, 0], f"{markers[i]}-", label=model_name, markersize=3)
+
+        x = ne[var_idx, 0]
+        y = p[var_idx, 0]
+        if max_step is not None:
+            x = ne[var_idx, 0, :max_step]
+            y = p[var_idx, 0, :max_step]
+
+        ax.plot(x, y, f"{markers[i]}-", label=model_name, markersize=3)
 
     unit = var_map[var].unit
-    ax.set_xlabel(f"Noise error [{unit}]")
+    ax.set_xlabel(f"Noise [{unit}]")
     ax.set_ylabel(f"Information [{unit}]")
     ax.set_title(var_map[var].name, pad=20)
 
@@ -256,8 +264,6 @@ def plot_lead_time_rmse(
         var: str,
         model_config: str,
         models: str | list[str] | None = None,
-        show_climatology: bool = True,
-        show_persistence: bool = True,
         ax: plt.Axes | None = None,
         ) -> plt.Axes:
     if ax is None:
@@ -333,23 +339,80 @@ def plot_lead_time_rmse(
     return ax
 
 
+def plot_rank_histogram(
+        models: list[str],
+        steps: list[int],
+        ) -> plt.Axes:
+    fig, axes = plt.subplots(ncols=len(steps), figsize=(3 * len(steps), 2.5), dpi=300)
+
+    ymax = 0
+    bins = 0
+    for model in models:
+        model_name, model_path, _ = MODELS[model]
+        metrics = np.load(model_path)
+        time_rank_hist = (
+                metrics["rank_histogram"].sum(axis=0) /
+                metrics["rank_histogram"].sum(axis=0).sum(axis=1).reshape(-1, 1)
+        )
+
+        for ax, step in zip(axes, steps):
+            data = time_rank_hist[step]
+            bins = data.shape[0]
+            ax.step(np.arange(data.shape[0]), data, where="mid", label=f"{model_name}")
+            ymax = max(ymax, np.max(data))
+
+    for ax, step in zip(axes, steps):
+        ax.set_ylim(0, ymax * 1.05)
+        ax.set_xlim(0, bins - 1)
+        ticks = np.arange(0, bins, step=2)
+        ax.set_xticks(ticks, labels=[str(int(t + 1)) for t in ticks])
+        ax.axhline(1.0 / bins, color="k", linestyle="--", zorder=-10)
+        ax.spines.top.set_visible(False)
+        ax.set_title(f"{(step + 1) * 6}h", pad=0)
+        ax.spines.left.set(linewidth=1.5)
+        ax.spines.bottom.set(linewidth=1.5)
+        ax.spines.right.set(linewidth=1.5)
+        ax.tick_params(which='major', direction="out", width=1.5, length=4)
+
+    for ax in axes[1:]:
+        ax.yaxis.set_tick_params(which='both', labelbottom=False)
+
+    axes[0].legend(
+        frameon=False,
+        framealpha=0.0,
+        loc="lower right",
+        fontsize=9,
+        ncol=1,
+    )
+    axes[0].set_xlabel("Rank")
+    axes[0].set_ylabel(r"$p(\text{Rank})$")
+
+    return axes
+
+
 
 if __name__ == "__main__":
-    #mpl.rc('text', usetex=True)
-
     plot_info_noise_acc(
-        "Z500",
+        "TP6h",
         model_config="../../configs/WeT_afno.yml",
-        models=["vit", "persistence"],
-        sci_ticks=False,
+        models=["vit", "AFNO", "persistence"],
+        sci_ticks=True,
+        max_step=4
     )
     plt.tight_layout()
     plt.show()
 
     plot_lead_time_rmse(
-        "TP6h",
+        "T2M",
         model_config="../../configs/WeT_afno.yml",
-        models=["vit"],
+        models=["vit", "AFNO"],
+    )
+    plt.tight_layout()
+    plt.show()
+
+    plot_rank_histogram(
+        models=["vit", "AFNO"],
+        steps=[0, 7, 19],
     )
     plt.tight_layout()
     plt.show()
