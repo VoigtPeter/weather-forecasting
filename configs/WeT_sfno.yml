@@ -1,15 +1,14 @@
 dataset: "./data/era5_2p8_3l.yml"
 
 model:
-  type: vit            # vit or persistence
-  dim: 256
-  num_layers: 12
+  type: wet
+  dim: 384
+  num_layers: 10
   num_heads: 4
   dim_heads: 64
-  patch_size: [4, 4]   # (hh, ww)
+  patch_size: [4, 4]   # (patch_lat, patch_lon)
   ffn_factor: 2
   separable_embed: True
-  noise: "adaLN"
   spatial_mixer: "sfno"
   noise_dim: 16
   dropout: 0.00
@@ -18,17 +17,24 @@ model:
   latlon_pe: "wrap"
   surface_geopotential: True
   land_sea_mask: True
+  aux_spatial_dim: 32
+  graph_conv: False
+  #graph_conv_level: 1
+  #graph_conv_layers: 1
+  #graph_conv_node_embed: 8
+  #graph_conv_edge_embed: 8
+  global_skip: False
 
 loss:
   name: crps
   kwargs:
     reduction: sphere  # "sphere" (corrects for distorted grid), "mean" naive mean
-    nlat: 32
-    nlon: 64
+    nlat: 64
+    nlon: 128
 
 trainer:
   lr: 1.0e-3
-  batch_size: 32
+  batch_size: 24
   ensemble_size: 2
   weight_decay: 0.01
   betas: [0.9, 0.95]

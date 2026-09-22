@@ -1,125 +1,200 @@
 import torch
+
+import xarray as xr
+from analysis.plots import _var_descriptor
 from wf.scaffold import ForecastModule
 import numpy as np
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
-from utils.config import Config
+from wf.utils.config import Config
 from wf.utils.ensemble import ensemble_batch, reverse_ensemble_batch
 
+MODELS = {
+    "vit": ("../configs/ViT.yml", "../logs/ViT_step4ft.ckpt", "ViT"),
+    "afno": ("../configs/WeT_afno.yml", "../logs/WeT_afno_step4ft.ckpt", r"WeT$_{\text{AFNO}}$"),
+    "afno_gcn": ("../configs/WeT_afno_gcn.yml", "../logs/WeT_afno_gcn_step4ft.ckpt", r"WeT$_{\text{AFNO+}}$"),
+    "sfno": ("../configs/WeT_sfno.yml", "../logs/WeT_sfno_step4ft.ckpt", r"WeT$_{\text{SFNO}}$"),
+    "sfno_gcn": ("../configs/WeT_sfno_gcn.yml", "../logs/WeT_sfno_gcn_step4ft.ckpt", r"WeT$_{\text{SFNO+}}$"),
+}
+
+
 if __name__ == "__main__":
-    config = Config.from_yaml("../configs/vit_train_2p8.yml")
-    #config = Config.from_yaml("../configs/wet_train_1p5_sfno.yml")
-    #config = Config.from_yaml("../configs/train.yml")
-    #config = Config.from_yaml("../configs/train_mhsa.yml")
-    config.dataset.in_memory = False
-    #test_model_statedict = torch.load("./test_model_5p6_test.pt")
-    module = ForecastModule.load_from_checkpoint("../logs/2p8_ViT/checkpoints/step_1/epoch=12-step=15807.ckpt", config=config).to("cpu")
-    #module = ForecastModule.load_from_checkpoint("../logs/1p5_sfno_WeT/checkpoints/step_4_ft/epoch=30-step=56575.ckpt", config=config).to("cpu")
-    #module = ForecastModule.load_from_checkpoint("../logs/2p8_sfno_4/checkpoints/step_2_ft/epoch=18-step=34694.ckpt", config=config).to("cpu")
-    #module = ForecastModule.load_from_checkpoint("../logs/2p8_mhsa/checkpoints/step_1/epoch=17-step=16434.ckpt", config=config).to("cpu")
-    #module.load_state_dict(test_model_statedict, strict=True)
-
-    steps = 30
-    idx = 23
-    ensemble_size = 4
-
-    with torch.no_grad():
-        x, time_x = module.val_dataset[idx]
-        x = x[:, 0, :, :].unsqueeze(0)
-        time_x = time_x[0].view(1)
-        print(x.shape, time_x.shape)
-        x = ensemble_batch(x, ensemble_size)
-        time_x = ensemble_batch(time_x, ensemble_size)
-        print(x.shape, time_x.shape)
-        gt = torch.cat([module.val_dataset[idx + i][0][:, 1, :, :].unsqueeze(dim=1) for i in range(steps)], dim=1)
-        pred = reverse_ensemble_batch(module.forecast(x, steps=steps, time=time_x), ensemble_size)[0]
-
-        print(pred.shape, gt.shape)
-
-    rmse_ensemble = list()
-    for i in range(steps):
-        pred_i = pred[:, :, i, :, :]
-        gt_i = gt[:, i, :, :].unsqueeze(0)
-        rmse = torch.sqrt(torch.mean((pred_i - gt_i)**2, dim=(1, 2, 3)))
-        rmse_ensemble.append(rmse)
-    rmse_ensemble = torch.stack(rmse_ensemble).detach().cpu().numpy().T
-
-    fig, ax = plt.subplots()
-    for i in range(ensemble_size):
-        ax.plot(np.arange(steps), rmse_ensemble[i])
-    plt.show()
-
-    var = 0
-    lat, lon = 40, 64
-    #lat, lon = 15, 50
-    true_forecast = list()
-    pred_forecast_mean = list()
-    pred_forecast_std = list()
-    for i in range(steps):
-        pred_i = pred[:, var, i, lat, lon]
-        gt_i = gt[var, i, lat, lon].unsqueeze(0)
-        true_forecast.append(gt_i.item())
-        pred_forecast_mean.append(pred_i.mean().item())
-        pred_forecast_std.append(pred_i.std().item())
-    true_forecast = np.array(true_forecast)
-    pred_forecast_mean = np.array(pred_forecast_mean)
-    pred_forecast_std = np.array(pred_forecast_std)
-
-    fig, ax = plt.subplots()
-    ax.plot(np.arange(steps), true_forecast, label="True", linewidth=2, c="k")
-    ax.plot(np.arange(steps), pred_forecast_mean, label="Predicted", linestyle="dashed", linewidth=2, c="tab:blue")
-    ax.fill_between(np.arange(steps), pred_forecast_mean - pred_forecast_std, pred_forecast_mean + pred_forecast_std, color="tab:blue", alpha=0.2)
-    plt.show()
+    var_map = _var_descriptor(MODELS["vit"][0])  # model doesnt matter, as it only looksup dataset confif
 
 
+    # forecast control
+    steps = 20
+    idx = 234
+    ensemble_size = 1
+    keep_last_n: int | None = None  # when we do looong rollouts but only care about the last steps
+
+    # plot control
+    times = (0, 3, 7, 19)
+    time_unit = "hour"
+    #times = (1,)
+    var = "U250"
+    out_name = "U250_forecast"
+    proj = ccrs.EqualEarth(central_longitude=180)
+    # proj = ccrs.EqualEarth(central_longitude=180)
+    # proj = ccrs.Orthographic(central_latitude=-90)
 
 
+    cmap_scale = 0.6 if isinstance(proj, ccrs.Orthographic) else 0.9
+    # -- make forecasts
+    gt_dataset: xr.Dataset | None = None
+    pred_datasets = dict()
+    show_models = ("afno",)
+    for model in show_models:
+        config = Config.from_yaml(MODELS[model][0])
+        config.dataset.in_memory = False
+        module = ForecastModule.load_from_checkpoint(MODELS[model][1], config=config).to("cpu")
 
-    #x = module.val_dataset[idx][:, 0, :, :].unsqueeze(0)
-    #gt = torch.cat([module.val_dataset[idx+i][:, 1, :, :].unsqueeze(dim=1) for i in range(steps)], dim=1)
-    #pred = module.forecast(x, steps=steps)[0]
+        print(f"Predicting with model {model} ...")
+        with torch.no_grad():
+            x, time_x = module.test_dataset[idx]
+            x = x[:, 0, :, :].unsqueeze(0)
+            time_x = time_x[0].view(1)
+            x = ensemble_batch(x, ensemble_size)
+            time_x = ensemble_batch(time_x, ensemble_size)
+            pred = reverse_ensemble_batch(module.forecast(x, steps=steps, time=time_x), ensemble_size)[0]
 
-    gt_dataset = module.val_dataset.to_xarray(gt, time=np.arange(steps))
-    pred_dataset = module.val_dataset.to_xarray(pred.transpose(1, 0), m=np.arange(ensemble_size), time=np.arange(steps))
+        _steps = steps
+        if keep_last_n is not None:
+            _steps = keep_last_n
+            pred = pred[:, :, -keep_last_n:, :, :]
+        if gt_dataset is None:
+            gt = torch.cat([module.test_dataset[idx + i][0][:, 1, :, :].unsqueeze(dim=1) for i in range(steps)], dim=1)
+            if keep_last_n is not None:
+                gt = gt[:, -keep_last_n:, :, :]
+            gt_dataset = module.val_dataset.to_xarray(gt, time=np.arange(_steps))
+        pred_dataset = module.val_dataset.to_xarray(pred.transpose(1, 0), m=np.arange(ensemble_size),
+                                                    time=np.arange(_steps))
+        pred_datasets[model] = pred_dataset
 
-    times = (0, 1, 2, 3, 4, 5)
+    # -- plot forecasts
+    titles_h = [(t + 1) * 6 for t in times]
+    if keep_last_n is not None:
+        titles_h = [(steps - keep_last_n + t + 1) * 6 for t in times]
+    if time_unit == "hour":
+        titles = [f"{t}h" for t in titles_h]
+    elif time_unit == "day":
+        titles = [f"{t // 24}d" for t in titles_h]
+    elif time_unit == "year":
+        titles = [f"{t // 365}y" for t in titles_h]
 
-    fig, axs = plt.subplots(len(times), figsize=(6, len(times)*6),
-        subplot_kw={"projection": ccrs.EqualEarth()}
-    )
+    vmin, vmax = 1e100, -1e100
     for i, t in enumerate(times):
-        (pred_dataset["T2M"] - gt_dataset["T2M"]).sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), cmap="RdBu", cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
-        axs[i].coastlines()
-    plt.show()
+        sample = gt_dataset[var].sel(time=t)
+        if sample.min() < vmin:
+            vmin = sample.min()
+        if sample.max() > vmax:
+            vmax = sample.max()
+    if var_map[var].cmap == "RdBu":
+        vabsmax = max(abs(vmin), abs(vmax))
+        vmin = -vabsmax
+        vmax = vabsmax
 
-
-    times = (0, 1, 2, 3, 4, 5, 6)
-
-    fig, axs = plt.subplots(len(times), figsize=(6, len(times)*6),
-        subplot_kw={"projection": ccrs.EqualEarth()}
-    )
+    fig, axs = plt.subplots(len(times), figsize=(3, (len(times) + 0.5) * 1.7),
+                            subplot_kw={"projection": proj},
+                            dpi=350,
+                            layout='constrained')
+    if len(times) == 1:
+        axs = [axs]
     for i, t in enumerate(times):
-        pred_dataset["T2M"].sel(time=t, m=0).plot(ax=axs[i], transform=ccrs.PlateCarree(), cmap="viridis", cbar_kwargs={"shrink": 0.6, "orientation": "horizontal"})
+        a = gt_dataset[var].sel(time=t).plot(
+            ax=axs[i],
+            transform=ccrs.PlateCarree(),
+            add_labels=False,
+            add_colorbar=False,
+            cmap=var_map[var].cmap,
+            vmin=vmin,
+            vmax=vmax,
+            rasterized=True,
+        )
         axs[i].coastlines()
+        axs[i].set_title(titles[i])
+    cbar = fig.colorbar(
+        a,
+        ax=axs if len(times) > 1 else axs[0],
+        pad=0.04,
+        orientation="horizontal",
+        label=f"{var_map[var].name} [{var_map[var].unit}]",
+        shrink=cmap_scale,
+    )
+    fig.suptitle(f"Ground truth")
+    plt.savefig(f"../{out_name}_plot_{var}_gt.pdf")
     plt.show()
 
+    # model pred
+    for model in show_models:
+        fig, axs = plt.subplots(len(times), figsize=(3, (len(times) + 0.5) * 1.7),
+                                subplot_kw={"projection": proj},
+                                dpi=350,
+                                layout='constrained')
+        if len(times) == 1:
+            axs = [axs]
+        for i, t in enumerate(times):
+            a = pred_datasets[model][var].sel(time=t, m=0).plot(
+                ax=axs[i],
+                transform=ccrs.PlateCarree(),
+                add_labels=False,
+                add_colorbar=False,
+                cmap=var_map[var].cmap,
+                vmin=vmin,
+                vmax=vmax,
+                rasterized=True,
+            )
+            axs[i].coastlines()
+            #axs[i].set_title(f"{(t + 1) * 6}h")
+            axs[i].set_title(" ")
+        cbar = fig.colorbar(a, ax=axs if len(times) > 1 else axs[0], pad=0.04, orientation="horizontal", label=f"{var_map[var].name} [{var_map[var].unit}]", shrink=cmap_scale,)
+        fig.suptitle(MODELS[model][2])
+        plt.savefig(f"../{out_name}_plot_{var}_{model}.pdf")
+        plt.show()
 
-    # animation"""
-    gt_dataset = module.val_dataset.to_xarray(gt, time=np.arange(steps))
-    pred_dataset = module.val_dataset.to_xarray(pred.transpose(1, 0), m=np.arange(ensemble_size), time=np.arange(steps))
 
-    var = "T2M"
-    north_pole = ccrs.Orthographic(0, 90)
+    # model error
+    emin, emax = -58, 58  # manual override
+    if emin is None or emax is None:
+        emin, emax = 1e100, -1e100
+        for model in show_models:
+            for i, t in enumerate(times):
+                sample = (pred_datasets[model][var] - gt_dataset[var]).sel(time=t, m=0)
+                if sample.min() < emin:
+                    emin = float(sample.min())
+                if sample.max() > emax:
+                    emax = float(sample.max())
+    eabsmax = max(abs(emin), abs(emax))
+    emin = -eabsmax
+    emax = eabsmax
 
-    fig, ax = plt.subplots(subplot_kw={"projection": ccrs.EqualEarth(central_longitude=0)})
-    def update(frame: int):
-        #ax.clear()
-        pred_dataset[var].sel(time=frame, m=0).plot(ax=ax, transform=ccrs.PlateCarree(), add_colorbar=False, cmap="viridis")
-        #gt_dataset[var].sel(time=frame).plot(ax=ax, transform=ccrs.PlateCarree(), add_colorbar=False, cmap="viridis")
-        ax.coastlines()
-        #ax.gridlines()
+    for model in show_models:
+        fig, axs = plt.subplots(len(times), figsize=(3, (len(times) + 0.5) * 1.7),
+                                subplot_kw={"projection": proj},
+                                dpi=350,
+                                layout='constrained')
+        if len(times) == 1:
+            axs = [axs]
+        for i, t in enumerate(times):
+            a = (pred_datasets[model][var] - gt_dataset[var]).sel(time=t, m=0).plot(
+                ax=axs[i],
+                transform=ccrs.PlateCarree(),
+                add_labels=False,
+                add_colorbar=False,
+                cmap="RdBu",
+                vmin=emin,
+                vmax=emax,
+                rasterized=True,
+            )
+            axs[i].coastlines()
+            #axs[i].set_title(f"{(t + 1) * 6}h")
+            axs[i].set_title(" ")
 
-    ani = animation.FuncAnimation(fig=fig, func=update, frames=steps, interval=100)
-    ani.save("./anim_mhsa.gif")
+        cbar = fig.colorbar(a, ax=axs if len(times) > 1 else axs[0], pad=0.04, orientation="horizontal",
+                            label=f"{var_map[var].name} [{var_map[var].unit}]", shrink=cmap_scale,)
+        #fig.suptitle(MODELS[model][2])
+        fig.suptitle(" ")
+        plt.savefig(f"../{out_name}_plot_{var}_{model}_err.pdf")
+        plt.show()

@@ -19,8 +19,6 @@ class PeriodicSinusoidalPE(nn.Module):
 class LatLonWrap(nn.Module):
     """
     Wrap encoding, as used by MacAodha et al
-
-    (copied from https://github.com/MarcCoru/locationencoder/blob/main/locationencoder/pe/wrap.py)
     """
     def __init__(self) -> None:
         super().__init__()

@@ -1,9 +1,12 @@
+import os
 from typing import NamedTuple
 
 import numpy as np
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+import pandas as pd
+from IPython.core.pylabtools import figsize
 from matplotlib.ticker import MaxNLocator
 
 from utils.config import Config
@@ -11,30 +14,20 @@ from wf.data.dataset import ERA5VariableConfig
 
 
 MODELS = {
-    "SFNO_": (
-        r"WeT$_{\text{SFNO_}}$",
-        "../../logs/WeT_sfno_base_metrics.npz",
-        None,
-    ),
     "SFNO":  (
         r"WeT$_{\text{SFNO}}$",
         "../../logs_final/WeT_sfno_step4ft_metrics.npz",
         ["T2M", "TP6h", 'T850', 'Z500'],  # subset vars
-    ),
-    "SFNO+_": (
-        r"WeT$_{\text{SFNO+_}}$",
-        "../../logs/WeT_sfno_gcn_base_metrics.npz",
-        None,
     ),
     "SFNO+": (
         r"WeT$_{\text{SFNO+}}$",
         "../../logs_final/WeT_sfno_gcn_step4ft_metrics.npz",
         ["T2M", "TP6h", 'T850', 'Z500'],  # subset vars
     ),
-    "AFNO_": (
-        r"WeT$_{\text{AFNO_}}$",
-        "../../logs/WeT_afno_base_metrics.npz",
-        None,
+    "AFNO+1": (
+        r"WeT$_{\text{AFNO+ (1)}}$",
+        "../../logs_final/WeT_afno_gcn_step1_metrics.npz",
+        ["T2M", "TP6h", 'T850', 'Z500'],  # subset vars
     ),
     "AFNO":  (
         r"WeT$_{\text{AFNO}}$",
@@ -51,21 +44,11 @@ MODELS = {
         "../../logs_final/WeT_afno_gcn_step4ft_metrics.npz",
         ["T2M", "TP6h", 'T850', 'Z500'],  # subset vars
     ),
-    #"persistence": (
-    #    r"Persistence",
-    #    "../../logs/persistence_metrics.npz",
-    #    ['T850', 'Z500'],  # subset vars
-    #),
     "persistence": (
         r"Persistence",
         "../../logs_final/persistence_metrics.npz",
         ["T2M", "TP6h", 'T850', 'Z500'],  # subset vars
     ),
-    #"climatology": (
-    #    r"Climatology",
-    #    "../../logs/clim_metrics.npz",
-    #    ['T850', 'Z500'],  # subset vars
-    #),
     "climatology": (
         r"Climatology",
         "../../logs_final/clim_metrics.npz",
@@ -77,17 +60,18 @@ MODELS = {
 class VarLabel(NamedTuple):
     name: str
     unit: str
+    cmap: str | None = None
 
 VAR_LEGEND = {
-    "T2M": VarLabel("2m temperature", "$K$"),
+    "T2M": VarLabel("2m temperature", "$K$", "viridis"),
     "TP6h": VarLabel("Total precipitation", "$m$"),
-    "U10M": VarLabel("10m U wind component", r"$m \cdot s^{-1}$"),
-    "V10M": VarLabel("10m V wind component", r"$m \cdot s^{-1}$"),
-    "Z...": VarLabel("Geopotential", r"$m^{2} \cdot s^{-2}$"),
-    "T...": VarLabel("Temperature", r"$K$"),
-    "Q...": VarLabel("Specific humidity", r"$kg \cdot kg^{-1}$"),
-    "U...": VarLabel("U component of wind", r"$m \cdot s^{-1}$"),
-    "V...": VarLabel("V component of wind", r"$m \cdot s^{-1}$"),
+    "U10M": VarLabel("10m U wind component", r"$m \cdot s^{-1}$", "RdBu"),
+    "V10M": VarLabel("10m V wind component", r"$m \cdot s^{-1}$", "RdBu"),
+    "Z...": VarLabel("Geopotential", r"$m^{2} \cdot s^{-2}$", "viridis"),
+    "T...": VarLabel("Temperature", r"$K$", "viridis"),
+    "Q...": VarLabel("Specific humidity", r"$kg \cdot kg^{-1}$", "viridis"),
+    "U...": VarLabel("U component of wind", r"$m \cdot s^{-1}$", "RdBu"),
+    "V...": VarLabel("V component of wind", r"$m \cdot s^{-1}$", "RdBu"),
 }
 
 class VarMapping:
@@ -99,7 +83,7 @@ class VarMapping:
                 self._var_legend[vk] = VAR_LEGEND[vk]
             elif f"{vk[0]}..." in VAR_LEGEND:
                 src_label = VAR_LEGEND[f"{vk[0]}..."]
-                self._var_legend[vk] = VarLabel(f"{src_label.name} ({vk})", src_label.unit)
+                self._var_legend[vk] = VarLabel(f"{src_label.name} ({vk})", src_label.unit, src_label.cmap)
 
     def __getitem__(self, item: int | str) -> VarLabel:
         if isinstance(item, int):
@@ -161,7 +145,7 @@ def _information_noise_diagram_helper(ax: plt.Axes, true_activity: float| tuple[
         ax.plot([ticks[1] * np.sin(ang), tick_max * np.sin(ang)], [ticks[1] * np.cos(ang), tick_max * np.cos(ang)], c=grid_color, linestyle=grid_linestyle, linewidth=grid_linewidth, alpha=grid_alpha, zorder=-10)
         #ax.annotate(f"{acc}", (tick_max * np.sin(ang), tick_max * np.cos(ang)), fontproperties=tick_font, bbox=dict(boxstyle='square,pad=0', fc='none', ec='none'),)
         ax.text(tick_max * np.sin(ang), tick_max * np.cos(ang), f"{acc}", fontsize="small", bbox=None)
-    ax.annotate(f"ACC", (0.75, 0.75), xycoords="axes fraction", fontsize="medium", color="k", rotation=-45)
+    ax.annotate(f"ACC", (0.9, 0.55), xycoords="axes fraction", fontsize="medium", color="k", rotation=-55)
 
     ax.plot(0, a_max, "o", ms=9, c="k", mfc="w")                                                          # the perfect forecast
     #ax.plot(noise_error, information, "o-", label=label, **plot_kwargs)
@@ -209,7 +193,7 @@ def plot_info_noise_acc(
     elif models is None:
         models = MODELS.keys()
     var_map = _var_descriptor(model_config)
-    markers = ("o", "D", "s", "v", "X")
+    markers = ("o", "D", "s", "v", "X", "P")
 
     ne_p_vals: dict[str, tuple[np.ndarray, np.ndarray]] = dict()
     for model in models:
@@ -248,14 +232,17 @@ def plot_info_noise_acc(
     ax.set_ylabel(f"Information [{unit}]")
     ax.set_title(var_map[var].name, pad=20)
 
-    ax.legend(
-        frameon=False,
-        framealpha=0.0,
-        bbox_to_anchor=(0.8, 0.05, 1, 1),
+    leg = ax.legend(
+        frameon=True,
+        framealpha=0.8,
+        facecolor='white',
+        edgecolor='white',
+        bbox_to_anchor=(0.8, 0.08, 1, 1),
         loc="upper left",
         fontsize=8,
         ncol=1,
     )
+    #leg.set_visible(False)
 
     return ax
 
@@ -265,6 +252,8 @@ def plot_lead_time_rmse(
         model_config: str,
         models: str | list[str] | None = None,
         ax: plt.Axes | None = None,
+        show_std: bool = False,
+        as_days: bool = False,
         ) -> plt.Axes:
     if ax is None:
         fig, ax = plt.subplots(figsize=(5, 4), dpi=300)
@@ -274,7 +263,7 @@ def plot_lead_time_rmse(
         models = MODELS.keys()
     var_map = _var_descriptor(model_config)
 
-    def _plot(model: str, legend: bool = True, alpha: float = 0.2, _ret_max_val: bool = False, **plot_kwargs) -> int | tuple[int, float]:
+    def _plot(model: str, legend: bool = True, std: bool = True, alpha: float = 0.2, _ret_max_val: bool = False, **plot_kwargs) -> int | tuple[int, float]:
         model_name, model_path, model_subset = MODELS[model]
         metrics = np.load(model_path)
         rmse = metrics["RMSE"][var_map.idx(var, subset=model_subset), 0]
@@ -282,7 +271,8 @@ def plot_lead_time_rmse(
         x = np.arange(rmse.shape[0])
         line = ax.plot(x, rmse, label=model_name if legend else None, **plot_kwargs)
         c = line[0].get_color()
-        ax.fill_between(x, rmse - rmse_std, rmse + rmse_std, alpha=alpha, facecolor=c)
+        if std:
+            ax.fill_between(x, rmse - rmse_std, rmse + rmse_std, alpha=alpha, facecolor=c)
         if _ret_max_val:
             return len(x), float((rmse + rmse_std).max()), line[0]
         return len(x)
@@ -295,16 +285,24 @@ def plot_lead_time_rmse(
 
     # models
     for model in models:
-        steps = max(_plot(model, alpha=0.2), steps)
+        steps = max(_plot(model, alpha=0.2, std=show_std), steps)
 
     ax.minorticks_on()
     ax.xaxis.set_tick_params(which='minor', bottom=False)
-    ticks = np.arange(steps+1, step=4) - 1
-    ticks[0] = 0
-    ax.set_xticks(
-        ticks,
-        labels=[f"{int(t)}" for t in (np.array(ticks) + 1) * 6],
-    )
+    if not as_days:
+        ticks = np.arange(steps+1, step=4) - 1
+        ticks[0] = 0
+        ax.set_xticks(
+            ticks,
+            labels=[f"{int(t)}" for t in (np.array(ticks) + 1) * 6],
+        )
+    else:
+        ticks = np.arange(steps + 1, step=12) - 1
+        ticks[0] = 0
+        ax.set_xticks(
+            ticks,
+            labels=[f"{int(t)}" for t in (np.array(ticks) + 1) * 0.25],
+        )
     ax.spines.top.set_visible(False)
     ax.spines.right.set_visible(False)
     ax.spines.left.set(linewidth=1.5)
@@ -312,6 +310,8 @@ def plot_lead_time_rmse(
     ax.tick_params(which='major', direction="out", width=1.5, length=4)
     ax.tick_params(which='minor', direction="out", width=1.0, length=3)
     ax.set_xlabel("Lead time [$h$]")
+    if as_days:
+        ax.set_xlabel("Lead time [$d$]")
     var = var_map[var]
     ax.set_ylabel(f"RMSE [{var.unit}]")
     ax.set_title(var.name)
@@ -390,24 +390,157 @@ def plot_rank_histogram(
     return axes
 
 
+def plot_train_losses(
+        model: str,
+        log_dir: str,
+        loss_name: str,
+        legend: bool = True,
+        hide_yaxis: bool = False,
+        ) -> None:
+    phase_1_logs = pd.read_csv(os.path.join(log_dir, "version_0/metrics.csv"), sep=",")
+    phase_2_logs = pd.read_csv(os.path.join(log_dir, "version_1/metrics.csv"), sep=",")
+
+    def _get_col(df: pd.DataFrame, col: str) -> np.ndarray:
+        return df[["step", col]][pd.notna(df[col])].to_numpy()
+
+    # phase 1
+    p1_train_loss = _get_col(phase_1_logs, "train/loss")
+    p1_val_loss_1 = _get_col(phase_1_logs, "val/loss_step1")
+    p1_val_loss_2 = _get_col(phase_1_logs, "val/loss_step2")
+    p1_val_loss_3 = _get_col(phase_1_logs, "val/loss_step3")
+
+    # phase 2
+    p2_train_loss = _get_col(phase_2_logs, "train/loss")
+    p2_val_loss_1 = _get_col(phase_2_logs, "val/loss_step1")
+    p2_val_loss_2 = _get_col(phase_2_logs, "val/loss_step2")
+    p2_val_loss_3 = _get_col(phase_2_logs, "val/loss_step3")
+
+    # time
+    p1_time = _get_col(phase_1_logs, "time")
+    p2_time = _get_col(phase_2_logs, "time")
+    p1_time = p1_time[-1, 1] - p1_time[0, 1]
+    p2_time = p2_time[-1, 1] - p2_time[0, 1]
+    total_seconds = p1_time + p2_time
+    print("total_seconds:", total_seconds, "total_hours:", total_seconds / 3600)
+
+    tmp_all = np.concatenate((
+        p1_train_loss, p1_val_loss_1, p1_val_loss_2, p1_val_loss_3,
+        p2_train_loss, p2_val_loss_1, p2_val_loss_2, p2_val_loss_3,
+    ), axis=0)
+    y_min = float(tmp_all[:, 1].min())
+    y_max = float(tmp_all[:, 1].max())
+    x1_max = float(p1_train_loss[:, 0].max())
+    x2_max = float(p2_train_loss[:, 0].max())
+
+    y_min = 0.05
+    y_max = 0.25
+
+    train_c = "k"
+    train_lw = 1
+    train_alpha = 0.3
+
+    val_c = (
+        "indigo",
+        "darkviolet",
+        "violet"
+    )
+    val_lw = 1.5
+
+    fig, (ax1, ax2) = plt.subplots(1,2, figsize=(5, 3), gridspec_kw={'width_ratios': [1, x2_max / x1_max]}, dpi=300)
+
+    ax1.plot(p1_val_loss_3[:, 0], p1_val_loss_3[:, 1], label="Validation @ 18h", c=val_c[0], linewidth=val_lw)
+    ax1.plot(p1_val_loss_2[:, 0], p1_val_loss_2[:, 1], label="Validation @ 12h", c=val_c[1], linewidth=val_lw)
+    ax1.plot(p1_val_loss_1[:, 0], p1_val_loss_1[:, 1], label="Validation @ 6h", c=val_c[2], linewidth=val_lw)
+    ax1.plot(p1_train_loss[:, 0], p1_train_loss[:, 1], label="Train", alpha=train_alpha, zorder=-10, c=train_c, linewidth=train_lw)
+
+    p1_min_idx = np.argmin(p1_val_loss_3[:, 1])
+    p1_min_x = p1_val_loss_3[p1_min_idx, 0]
+    p1_min_y = p1_val_loss_3[p1_min_idx, 1]
+    pp1 = ax1.scatter([p1_min_x], [p1_min_y], marker="o", s=40, lw=1, edgecolor=val_c[0], fc="None", label="min. loss")
+    #ax1.arrow(p1_min_x, p1_min_y*1.3, 0, p1_min_y - p1_min_y*1.3, arrowprops=dict(arrowstyle="->"))
+    #ax1.annotate("best", xytext=(p1_min_x, p1_min_y*1.3), xy=(p1_min_x, p1_min_y),
+    #            arrowprops=dict(arrowstyle="->", color=val_c[0], linewidth=val_lw))
+
+    ax2.plot(p2_val_loss_3[:, 0], p2_val_loss_3[:, 1], c=val_c[0], linewidth=val_lw)
+    ax2.plot(p2_val_loss_2[:, 0], p2_val_loss_2[:, 1], c=val_c[1], linewidth=val_lw)
+    ax2.plot(p2_val_loss_1[:, 0], p2_val_loss_1[:, 1], c=val_c[2], linewidth=val_lw)
+    ax2.plot(p2_train_loss[:, 0], p2_train_loss[:, 1], alpha=train_alpha, zorder=-10, c=train_c, linewidth=train_lw)
+    p2_min_idx = np.argmin(p2_val_loss_3[:, 1])
+    p2_min_x = p2_val_loss_3[p2_min_idx, 0]
+    p2_min_y = p2_val_loss_3[p2_min_idx, 1]
+    pp2 = ax2.scatter([p2_min_x], [p2_min_y], marker="o", s=40, lw=1, edgecolor=val_c[0], fc="None")
+
+
+    ax1.set_ylim(y_min, y_max)
+    ax2.set_ylim(y_min, y_max)
+    ax1.set_xlim(0, x1_max)
+    ax2.set_xlim(0, x2_max)
+    ax1.spines.right.set_visible(False)
+    ax1.spines.top.set_visible(False)
+    ax2.spines.left.set_visible(False)
+    ax2.spines.right.set_visible(False)
+    ax2.spines.top.set_visible(False)
+    ax2.yaxis.set_visible(False)
+    ax1.spines.left.set(linewidth=1.5)
+    ax1.spines.bottom.set(linewidth=1.5)
+    ax2.spines.bottom.set(linewidth=1.5)
+    ax1.tick_params(which='major', direction="out", width=1.5, length=4)
+    ax2.tick_params(which='major', direction="out", width=1.5, length=4)
+
+    ax1.set_ylabel(loss_name)
+    ax1.set_xlabel(r"Phase 1 [$step$]")
+    ax2.set_xlabel(r"Phase 2 [$step$]")
+
+    if legend:
+        fig.legend(
+            frameon=False,
+            loc="center right",
+            fontsize=9,
+            bbox_to_anchor=(1., 0.7)
+        )
+    if hide_yaxis:
+        ax1.yaxis.set_ticklabels([])
+        ax1.set_ylabel(" ")
+    #fig.add_artist(leg)
+    pp1.set_clip_on(False)
+    pp2.set_clip_on(False)
+
+    fig.suptitle(MODELS[model][0])
+
+
 
 if __name__ == "__main__":
-    plot_info_noise_acc(
-        "TP6h",
-        model_config="../../configs/WeT_afno.yml",
-        models=["vit", "AFNO+", "SFNO+", "persistence"],
-        sci_ticks=True,
-        max_step=4
+    plot_train_losses(
+        model = "AFNO",
+        log_dir=f"../../logs_final/SFNO_P",
+        loss_name="fCRPS",
+        legend=True,
+        hide_yaxis=False,
     )
     plt.tight_layout()
+    #plt.savefig(f"../../losses_showcase_afno.pdf")
     plt.show()
 
-    #plot_lead_time_rmse(
-    #    "TP6h",
+    #plot_info_noise_acc(
+    #    "T850",
     #    model_config="../../configs/WeT_afno.yml",
-    #    models=["AFNO+", "SFNO+"],
+    #    models=["vit", "AFNO", "AFNO+", "SFNO", "SFNO+", "persistence"],
+    #    #sci_ticks=True,
+    #    max_step=20
     #)
     #plt.tight_layout()
+    #plt.savefig("../../info_noise_T850.pdf")
+    #plt.show()
+
+    #plot_lead_time_rmse(
+    #    "Z500",
+    #    model_config="../../configs/WeT_afno.yml",
+    #    models=[ "AFNO", "AFNO+"],
+    #    show_std=True,
+    #    as_days=True,
+    #)
+    #plt.tight_layout()
+    #plt.savefig("../../lead_RMSE_Z500_30d.pdf")
     #plt.show()
 
     #plot_rank_histogram(
@@ -415,4 +548,5 @@ if __name__ == "__main__":
     #    steps=[0, 7, 19],
     #)
     #plt.tight_layout()
+    #plt.savefig("../../rank_histogram_all.pdf")
     #plt.show()

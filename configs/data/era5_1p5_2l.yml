@@ -1,32 +1,28 @@
-name: era5_2p8
+name: era5_1p5
 train_data_path: ...
 val_data_path: ...
-test_data_path: ...
 stats_path: ...
 clim_path: ...
 static_path: ...
 variables:
-  T: [600, 850, 1000]
-  Z: [300, 500,  700]
-  Q: [500, 700,  925]
-  U: [150, 250,  400]
-  V: [150, 250,  400]
+  T: [600, 850]
+  Z: [300, 500]
+  Q: [500, 700]
+  U: [250, 400]
+  V: [250, 400]
   T2M: True
   U10M: True
   V10M: True
   TP6h: True
 train_time_slice:
-  start: "2016"
-  stop: "2016"
+  start: "2006"
+  stop: "2015"
 val_time_slice:
   start: "2016"
   stop: "2016"
-test_time_slice:
-  start: "2017"
-  stop: "2019"
-train_seq_len: 2     # we train using the next step
+train_seq_len: 2
 train_seq_stride: 1
-val_seq_len: 4       # val: larger window we perform rollout on
+val_seq_len: 4
 val_seq_stride: 1
 convert_lon_360_to_180: True
 in_memory: True

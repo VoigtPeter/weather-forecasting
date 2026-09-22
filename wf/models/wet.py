@@ -12,13 +12,10 @@ from wf.modules.transformer import TransformerBlock
 
 
 class TimePE(nn.Module):
-    #tf: torch.Tensor
-
     def __init__(self, dim: int) -> None:
         super().__init__()
         self.time_day_pe = PeriodicSinusoidalPE(dim=dim, period=24.0)
         self.time_year_pe = PeriodicSinusoidalPE(dim=dim, period=356.25 * 24.0)
-        #self.register_buffer("tf", torch.tensor(24.0, dtype=torch.float32))
         self.out_dim: int = 2 * dim
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

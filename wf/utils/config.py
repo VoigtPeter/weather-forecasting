@@ -1,18 +1,15 @@
 import os.path
-from typing import Literal
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 
 import json
 import yaml
 
 from wf.data.dataset import WeatherDatasetConfig
-from wf.models.vit import ViTConfig
 from wf.models.wet import WeTConfig
 
 
-_t_model_cfg = ViTConfig | WeTConfig
+_t_model_cfg =  WeTConfig
 _MODEL_TYPES = {
-    "vit": ViTConfig,
     "wet": WeTConfig,
 }
 
@@ -80,7 +77,3 @@ class TrainerConfig:
 class LossConfig:
     name: str
     kwargs: dict | None = None
-
-
-if __name__ == "__main__":
-    print(Config.from_yaml(r"C:\Users\voigt\PycharmProjects\weather-forecasting\configs\train.yml"))

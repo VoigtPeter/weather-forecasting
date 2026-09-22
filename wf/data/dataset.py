@@ -1,6 +1,5 @@
 import datetime
 import os
-import time
 
 from dataclasses import dataclass, field
 from typing import Literal, Sequence
@@ -8,7 +7,6 @@ from typing import Literal, Sequence
 import torch
 import xarray as xr
 import numpy as np
-import yaml
 from einops import rearrange
 
 from torch.utils.data import Dataset
@@ -476,25 +474,3 @@ class WeatherDatasetConfig:
     extra_features: dict | None = None
     clim_path: str | None = None
     static_path: str | None = None
-
-
-if __name__ == "__main__":
-    config = WeatherDatasetConfig(**yaml.safe_load(open("../../configs/data/era5_2p8_3l.yml", "r")))
-    config.in_memory = False
-    train_dataset, val_dataset, test_dataset = WeatherDataset.from_config(config)
-    #time.sleep(5)
-    print("downloading test...")
-    test_dataset.download()
-    #print("downloading validation...")
-    #val_dataset.download()
-    print("downloading DONE")
-    #print(len(train_dataset.ds.time))
-    #train_dataset.download_static_features()
-    #print(train_dataset.ds.values())
-    #print(dataset.data.shape, dataset.data.is_shared())
-
-    #print(len(train_dataset), train_dataset.variables)
-    #sample = train_dataset[6]
-    #print(sample)
-    #train_dataset.land_sea_mask
-

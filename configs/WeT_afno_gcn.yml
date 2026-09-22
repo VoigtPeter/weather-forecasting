@@ -1,7 +1,7 @@
 dataset: "./data/era5_2p8_3l.yml"
 
 model:
-  type: wet            # vit or persistence
+  type: wet
   dim: 256
   num_layers: 8
   num_heads: 4
@@ -9,7 +9,7 @@ model:
   patch_size: [4, 4]   # (patch_lat, patch_lon)
   ffn_factor: 2
   separable_embed: True
-  spatial_mixer: "sfno"
+  spatial_mixer: "afno"
   noise_dim: 16
   dropout: 0.00
   time_embed: 8

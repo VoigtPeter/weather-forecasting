@@ -445,27 +445,25 @@ class GridGraphConv(nn.Module):
 
 if __name__ == "__main__":
     B = 3
-    lat, lon = 15, 30
+    lat, lon = 16, 32
     dim = 32
 
-    grid = GridIcoSphere(lat, lon, mesh_level=0)
 
     gc = GridGraphConv(
         dim,
         lat,
         lon,
         2,
-        mesh_level=2,
+        mesh_level=1,
         edge_embed=8,
         node_embed=6,
         ffn_factor=2,
     )
-
-
     x = torch.randn(B, lat*lon, dim)
     print(x.shape)
     x = gc(x)
     print(x.shape)
 
+    grid = GridIcoSphere(lat, lon, mesh_level=1)
     grid.plot()
     plt.show()
